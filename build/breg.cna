@@ -1,0 +1,296 @@
+
+alias breg{
+	
+	local('$barch $hBofFile $bofFileData $packedArgs $command $key $keyroot $value $emptyVal $dataType $data $hexstring');
+
+	# figure out the arch of this session
+	$barch  = barch($1);
+	
+	# read in the right BOF file
+	$hBofFile = openf(script_resource("breg. $+ $barch $+ .o"));
+	$bofFileData   = readb($hBofFile, -1);
+	closef($hBofFile);
+
+	if($2 is $null || $3 is $null){
+		berror($1, "Usage: breg <command> <key> [options]");
+		return;
+	}
+
+	$key = $3;
+	if( strlen($key) < 4 && (lc($key) !eq "hku") ){
+		berror($1, "breg: The registry key $key does not start with one of the following: HKLM, HKCU, HKCR, HKU, HKCC");
+		return;
+	}
+	$keyroot = lc(substr($key, 0, 4));
+	if( ($keyroot !eq "hklm") && ($keyroot !eq "hkcu") && ($keyroot !eq "hkcr") && ($keyroot !eq "hku") && ($keyroot !eq "hkcc") && ($keyroot !eq "hku\\") ){
+		berror($1, "breg: The registry key \"$key\" does not start with one of the following: HKLM, HKCU, HKCR, HKU, HKCC");
+		return;
+	}
+	if( $keyroot eq "hku\\" ){
+		$keyroot = "hku";
+	}
+
+	if( (strlen($key) > strlen($keyroot)) && (charAt($key, strlen($keyroot)) !eq "\\" ) ){
+		berror($1, "breg: The character following root key \"" . uc($keyroot) . "\" must be a slash or end of string");
+		return;
+	}
+
+	if(lc($2) eq "query"){
+		$command = "query";
+	}
+	else if(lc($2) eq "add"){
+		$command = "add";
+	}
+	else if(lc($2) eq "delete"){
+		$command = "delete";
+	}
+	else{
+		berror($1, "breg: The only commands supported at the moment are 'query', 'add', or 'delete'.");
+		return;
+	}
+
+	if($4 is $null){
+		$packedArgs = bof_pack($1, "zz", $command, $key);
+		btask($1, "Tasked beacon to $command $key");
+		#TODO - add binline_execute
+		return;
+	}
+	else{
+		$value = $null;
+		$emptyVal = 0;
+		$dataType = $null;
+		$data = $null;
+		if(lc($4) eq "/v"){
+			$value = $5;
+			if($value is $null){
+				berror($1, "breg: a value must follow '/v'");
+				return;
+			}
+		}
+		else if (lc($4) eq "/d"){
+			if($command !eq "add"){
+				berror($1, "breg: the $command command does not support the '/d' argument");
+				return;
+			}
+			if($data !is $null){
+				berror($1, "breg: cannot specify '/d' more than once");
+				return;
+			}
+			if($5 is $null){
+				berror($1, "breg: a value must follow '/d'");
+				return;
+			}
+			$data = $5;
+		}
+		else if(lc($4) eq "/t"){
+			if($command !eq "add"){
+				berror($1, "breg: the $command command does not support the '/t' argument");
+				return;
+			}
+			if($dataType !is $null){
+				berror($1, "breg: cannot specify '/t' more than once");
+				return;
+			}
+			if($5 is $null){
+				berror($1, "breg: a value must follow '/t'");
+				return;
+			}
+			$dataType = uc($5);
+			if( ($dataType !eq "REG_SZ") && ($dataType !eq "REG_DWORD") && ($dataType !eq "REG_QWORD") && ($dataType !eq "REG_NONE")){
+				berror($1, "breg: The registry type must be one of the following: REG_SZ, REG_DWORD, REG_QWORD, REG_NONE");
+				return;
+			}
+		}
+		else{
+			berror($1, "breg: Unknown argument $4");
+			return;
+		}
+
+	}
+	if($6 is $null){
+		if($command eq "query"){
+			if(strlen($value) == 0){
+				$emptyVal = 1;
+			}
+			$packedArgs = bof_pack($1, "zzzi", $command, $key, $value, $emptyVal);
+			btask($1, "Tasked beacon to $command $key value $value");
+			return;
+		}
+		else{
+			berror($1, "breg: if extra arguments are provided to the 'add' command then at least both '/v' and '/d' must be included, or '/v' must be included and '/t' must be REG_NONE");
+			return;
+		}
+	}
+	else{
+		if(lc($6) eq "/v"){
+			if($value !is $null){
+				berror($1, "breg: cannot specify '/v' more than once");
+				return;
+			}
+			$value = $7;
+			if($value is $null){
+				berror($1, "breg: a value must follow '/v'");
+				return;
+			}
+		}
+		else if (lc($6) eq "/d"){
+			if($command !eq "add"){
+				berror($1, "breg: the $command command does not support the '/d' argument");
+				return;
+			}
+			if($data !is $null){
+				berror($1, "breg: cannot specify '/d' more than once");
+				return;
+			}
+			if($7 is $null){
+				berror($1, "breg: a value must follow '/d'");
+				return;
+			}
+			$data = $7;
+		}
+		else if(lc($6) eq "/t"){
+			if($command !eq "add"){
+				berror($1, "breg: the $command command does not support the '/t' argument");
+				return;
+			}
+			if($dataType !is $null){
+				berror($1, "breg: cannot specify '/t' more than once");
+				return;
+			}
+			if($7 is $null){
+				berror($1, "breg: a value must follow '/t'");
+				return;
+			}
+			$dataType = uc($7);
+			if( ($dataType !eq "REG_SZ") && ($dataType !eq "REG_DWORD") && ($dataType !eq "REG_QWORD") && ($dataType !eq "REG_NONE")){
+				berror($1, "breg: The registry type must be one of the following: REG_SZ, REG_DWORD, REG_QWORD, REG_NONE");
+				return;
+			}
+		}
+		else{
+			berror($1, "breg: Unknown argument $6");
+			return;
+		}
+
+	}
+	if($8 is $null){
+		if($value is $null){
+			berror($1, "breg: If options are included then '/v' must not be null. If you are trying to emulate /ve then you must specify an empty string following '/v'");
+			return;
+		}
+		if( ($data is $null) && ($dataType !eq "REG_NONE") ){
+			berror($1, "breg: '/d' must be provided for data type $dataType");
+			return;
+		}
+		if($dataType is $null){
+			$dataType = "REG_SZ";
+		}
+		#now we can pack and send
+		if(strlen($value) == 0){
+			$emptyVal = 1;
+		}
+		if($dataType eq "REG_SZ"){
+			$packedArgs = bof_pack($1, "zzzizz", $command, $key, $value, $emptyVal, $dataType, $data);
+			btask($1, "Tasked beacon to $command $key value \"$value\" with data \"$data\" [" . $dataType . "]");
+			return;
+		}
+		else if($dataType eq "REG_NONE"){
+			$packedArgs = bof_pack($1, "zzziz", $command, $key, $value, $emptyVal, $dataType);
+			btask($1, "Tasked beacon to $command $key value \"$value\" with datatype $dataType");
+			return;
+		}
+	}
+	else{
+		if(lc($8) eq "/v"){
+			if($value !is $null){
+				berror($1, "breg: cannot specify '/v' more than once");
+				return;
+			}
+			$value = $9;
+			if($value is $null){
+				berror($1, "breg: a value must follow '/v'");
+				return;
+			}
+		}
+		else if (lc($8) eq "/d"){
+			if($data !is $null){
+				berror($1, "breg: cannot specify '/d' more than once");
+				return;
+			}
+			if($9 is $null){
+				berror($1, "breg: a value must follow '/d'");
+				return;
+			}
+			$data = $9;
+		}
+		else if(lc($8) eq "/t"){
+			if($dataType !is $null){
+				berror($1, "breg: cannot specify '/t' more than once");
+				return;
+			}
+			if($9 is $null){
+				berror($1, "breg: a value must follow '/t'");
+				return;
+			}
+			$dataType = uc($9);
+			if( ($dataType !eq "REG_SZ") && ($dataType !eq "REG_DWORD") && ($dataType !eq "REG_QWORD") && ($dataType !eq "REG_NONE")){
+				berror($1, "breg: The registry type must be one of the following: REG_SZ, REG_DWORD, REG_QWORD, REG_NONE");
+				return;
+			}
+		}
+		else{
+			berror($1, "breg: Unknown argument $8");
+			return;
+		}
+
+	}
+	#at this point /v, /t , and /d have been entered so we just have to parse it
+	if( ($value is $null) || ($data is $null) || ($dataType is $null) ){
+		berror($1, "breg: somehow one of the arguments is still null. This is a bug");
+		return;
+	}
+	if(strlen($value) == 0){
+		$emptyVal = 1;
+	}
+	if($dataType eq "REG_SZ"){
+		$packedArgs = bof_pack($1, "zzzizz", $command, $key, $value, $emptyVal, $dataType, $data);
+		btask($1, "Tasked beacon to $command $key value \"$value\" with data \"$data\" [" . $dataType . "]");
+		#TODO - binline_execute
+		return;
+	}
+	else if($dataType eq "REG_NONE"){
+		$packedArgs = bof_pack($1, "zzziz", $command, $key, $value, $emptyVal, $dataType);
+		btask($1, "Tasked beacon to $command $key value \"$value\" with datatype $dataType");
+		#TODO - binline_execute
+		return;
+	}
+	else if( ($dataType eq "REG_DWORD") || ($dataType eq "REG_QWORD") ){
+		if($data ismatch '0[xX][0-9a-fA-F]+'){
+			$hexstring = $data;
+			$data = formatNumber(substr($data, 2), 16, 10);
+		}
+		else if( -isnumber $data ){
+			$hexstring = "0x" . formatNumber($data, 10, 16);
+		}
+		else{
+			berror($1, "breg: a datatype of $dataType was specified but \"$data\" is not a valid number");
+			return;
+		}
+		if( ($dataType eq "REG_DWORD") && ($data > 4294967295) ){
+			berror($1, "breg: $data [" . $hexstring . "] is larger than the max limit for type REG_DWORD");
+			return;
+		}
+		$packedArgs = bof_pack($1, "zzzizi", $command, $key, $value, $emptyVal, $dataType, $data);
+		btask($1, "Tasked beacon to $command $key value \"$value\" with data \"$hexstring\" [" . $dataType . "]");
+		#TODO - binline_execute
+		return;
+	}
+	else{
+		berror($1, "breg: Somehow you provided a datatype of \"$dataType\" which shouldn't be allowed. This is a bug.");
+		return;
+	}
+
+}
+
+
+
