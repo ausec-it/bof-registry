@@ -51,7 +51,7 @@ alias breg{
 
 	if($4 is $null){
 		$packedArgs = bof_pack($1, "zz", $command, $key);
-		btask($1, "Tasked beacon to $command $key");
+		btask($1, "Tasked beacon to run $0");
 		#TODO - add binline_execute
 		return;
 	}
@@ -113,7 +113,7 @@ alias breg{
 				$emptyVal = 1;
 			}
 			$packedArgs = bof_pack($1, "zzzi", $command, $key, $value, $emptyVal);
-			btask($1, "Tasked beacon to $command $key value $value");
+			btask($1, "Tasked beacon to run $0");
 			return;
 		}
 		else{
@@ -191,12 +191,12 @@ alias breg{
 		}
 		if($dataType eq "REG_SZ"){
 			$packedArgs = bof_pack($1, "zzzizz", $command, $key, $value, $emptyVal, $dataType, $data);
-			btask($1, "Tasked beacon to $command $key value \"$value\" with data \"$data\" [" . $dataType . "]");
+			btask($1, "Tasked beacon to run $0");
 			return;
 		}
 		else if($dataType eq "REG_NONE"){
 			$packedArgs = bof_pack($1, "zzziz", $command, $key, $value, $emptyVal, $dataType);
-			btask($1, "Tasked beacon to $command $key value \"$value\" with datatype $dataType");
+			btask($1, "Tasked beacon to run $0");
 			return;
 		}
 	}
@@ -254,13 +254,13 @@ alias breg{
 	}
 	if($dataType eq "REG_SZ"){
 		$packedArgs = bof_pack($1, "zzzizz", $command, $key, $value, $emptyVal, $dataType, $data);
-		btask($1, "Tasked beacon to $command $key value \"$value\" with data \"$data\" [" . $dataType . "]");
+		btask($1, "Tasked beacon to run $0");
 		#TODO - binline_execute
 		return;
 	}
 	else if($dataType eq "REG_NONE"){
 		$packedArgs = bof_pack($1, "zzziz", $command, $key, $value, $emptyVal, $dataType);
-		btask($1, "Tasked beacon to $command $key value \"$value\" with datatype $dataType");
+		btask($1, "Tasked beacon to run $0");
 		#TODO - binline_execute
 		return;
 	}
@@ -281,7 +281,7 @@ alias breg{
 			return;
 		}
 		$packedArgs = bof_pack($1, "zzzizi", $command, $key, $value, $emptyVal, $dataType, $data);
-		btask($1, "Tasked beacon to $command $key value \"$value\" with data \"$hexstring\" [" . $dataType . "]");
+		btask($1, "Tasked beacon to run $0");
 		#TODO - binline_execute
 		return;
 	}
@@ -292,5 +292,17 @@ alias breg{
 
 }
 
+beacon_command_register(
+	"breg",
+	"[+] Queries, adds, or deletes keys/values in the windows registry using a beacon object file",
+	"Queries, adds, or deletes keys/values in the windows registry using a beacon object file
 
-
+Usage: breg <command> <key> [/v value] [/t type] [/d data]
+   - command: 'query', 'add', or 'delete'. Other registry commands are not supported at this time
+   - key: A windows registry key
+      - If local must start with HKLM, HKCU, HKCR, HKU, or HKCC
+      - If remote must be of the form \\\\computername\\hiveroot[\\subkey], where hiveroot is one of the aforementioned keys
+   - value: A value to query, add, or delete if dealing with values. Specify an empty string to manipulate the default value of a key (equivalent to /ve)
+   - type: One of the following: REG_SZ, REG_NONE, REG_DWORD, REG_QWORD. Other types are not supported at this time. Default is REG_SZ
+   - data: Data to add if adding a value. This value is required when adding a value unless the type is REG_NONE
+");
