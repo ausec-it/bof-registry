@@ -22,8 +22,11 @@ $ArgumentParsingError = "NobodyIsLikelyToIncludeThisAsAValueOnAnActualTargetMach
 %ArchEnum = %(
 	default => 0,
 	x64 => 256,
+	64 => 256,
 	x86 => 512,
-	x32 => 512
+	86 => 512,
+	x32 => 512,
+	32 => 512
 );
 
 alias breg{
@@ -101,7 +104,7 @@ alias breg{
 		return;
 	}
 	if( ( ($command eq "query") || ($command eq "delete") )&& ( ($data !is $null) || ($dataType !is $null) ) ){
-		berror($1, "breg: the '" . $command . "' command only supports the '/v' argument");
+		berror($1, "breg: the '" . $command . "' command only supports the '/v' and '/a' arguments");
 		return;
 	}
 	if($dataType is $null){
@@ -139,15 +142,19 @@ alias breg{
 	}
 	if($archString !is $null){
 		$archString = lc($archString);
-		if( ($archString !eq "x64") && ($archString !eq "x86") && ($archString !eq "x32") ){
+		if( $archString !in %ArchEnum ){
 			berror($1, "breg: Architecture can only be 'x64' or 'x32'");
 			return;
 		}
 	}
+	else{
+		$archString = "default";
+	}
 
+	$arch = %ArchEnum[$archString];
 	$dataTypeNum = %RegistryTypes[$dataType];
 
-	$packedArgs = bof_pack($1, "zzzzziz", $command, $remoteComputerName, uc($hiveRoot), $key, $value, $dataTypeNum, $data);
+	$packedArgs = bof_pack($1, "zzzizziz", $command, $remoteComputerName, uc($hiveRoot), $arch, $key, $value, $dataTypeNum, $data);
 	btask($1, "Tasked beacon to run $0");
 	beacon_inline_execute($1, $bofFileData, "go", $packedArgs);
 }
@@ -160,7 +167,7 @@ alias breg{
 sub BasicArgumentValidation{
 	local('@validArguments $bid $arg4 $arg6 $arg8');
 
-	@validArguments = @( $null, "/v", "/t", "/d" );
+	@validArguments = @( $null, "/v", "/t", "/d", "/a" );
 
 	$bid = $1;
 	$arg4 = lc($2);
@@ -268,4 +275,5 @@ Usage: breg <command> <key> [/v value] [/t type] [/d data] [/a arch]
    - value: A value to query, add, or delete if dealing with values. Specify an empty string to manipulate the default value of a key (equivalent to /ve)
    - type: One of the following: REG_SZ, REG_NONE, REG_DWORD, REG_QWORD, REG_EXPAND_SZ. Other types are not supported at this time. Default is REG_SZ
    - data: Data to add if adding a value. This value is required when adding a value unless the type is REG_NONE
+   - arch: The version of the registry to check. Can be 'x64' or 'x32'. Default is the arch of the current beacon
 ");

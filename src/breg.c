@@ -7,6 +7,7 @@ void go(char* args, int arglen){
     REGISTRY_OPERATION registryOperation;
     LPCSTR ComputerName;
     HKEY HiveRoot;
+    REGSAM ArchType;
     LPCSTR KeyName;
     LPCSTR ValueName;
     DWORD DataType;
@@ -14,46 +15,130 @@ void go(char* args, int arglen){
     LONGLONG DataNum;
     DWORD DataSize;
     
-    if(!ParseArguments(args, arglen, &registryOperation, &ComputerName, &HiveRoot, &KeyName, &ValueName, &DataType, &Data, &DataNum, &DataSize))
+    if(!ParseArguments(args, arglen, &registryOperation, &ComputerName, &HiveRoot, &ArchType, &KeyName, &ValueName, &DataType, &Data, &DataNum, &DataSize))
         return;
 
     if(registryOperation == RegistryQueryOperation){
-        QueryKey(ComputerName, HiveRoot, KeyName, ValueName);
+        QueryKey(ComputerName, HiveRoot, ArchType, KeyName, ValueName);
     }
 
 }
 
-void QueryKey(LPCSTR ComputerName, HKEY HiveRoot, LPCSTR KeyName, LPCSTR ValueName){
+void QueryKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName, LPCSTR ValueName){
     if(ValueName == NULL)
-        EnumerateKey(ComputerName, HiveRoot, KeyName);
+        EnumerateKey(ComputerName, HiveRoot, ArchType, KeyName);
+    else
+        QueryKey(ComputerName, HiveRoot, ArchType, KeyName, ValueName);
 }
 
-void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, LPCSTR KeyName){    
-
-    HANDLE hHeap = KERNEL32$GetProcessHeap();
+//returns a handle to the specified registry key, null if failure
+HKEY OpenKeyHandle(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, ACCESS_MASK DesiredAccess, LPCSTR KeyName){
+    
+    LSTATUS lret;
+    HKEY hKey = NULL;
 
     const char* hiveRootString = HiveRootKeyToString(HiveRoot);
 
-    if(hHeap == NULL){
-        BeaconPrintf(CALLBACK_OUTPUT, "[-] breg: Failed to open process heap [error %d]\n", hiveRootString, KeyName, KERNEL32$GetLastError());
-            return;
-    }
-
-    LSTATUS lret;
-    HKEY hKey = NULL;
+    const char* computerString = ComputerName;
+    const char* computerNameSeparator = "\\";
+    if(ComputerName == NULL)
+        computerNameSeparator = computerString = "";
 
     if(ComputerName != NULL){
         //todo - add remote support
         BeaconPrintf(CALLBACK_OUTPUT, "Remote Not Supported\n");
-        return;
+        return NULL;
     }
     else{
-        lret = ADVAPI32$RegOpenKeyA(HiveRoot, KeyName, &hKey);
+        lret = ADVAPI32$RegOpenKeyExA(HiveRoot, KeyName, 0, ArchType | DesiredAccess, &hKey);
         if(lret != ERROR_SUCCESS){
-            BeaconPrintf(CALLBACK_OUTPUT, "[-] breg: Failed to open '%s\\%s' [error %d]\n", hiveRootString, KeyName, lret);
+            BeaconPrintf(CALLBACK_ERROR, "breg: Failed to open '%s%s%s\\%s' [error %d]\n", computerString, computerNameSeparator, hiveRootString, KeyName, lret);
+            return NULL;
+        }
+    }
+
+    return hKey;
+}
+
+void QueryValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName, LPCSTR ValueName){
+    
+    HANDLE hHeap = KERNEL32$GetProcessHeap();
+
+    if(hHeap == NULL){
+        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to open process heap [error %d]\n", KERNEL32$GetLastError());
+        return;
+    }
+
+    LSTATUS lret;
+    HKEY hKey = OpenKeyHandle(ComputerName, HiveRoot, ArchType, KEY_READ, KeyName);
+    if(hKey == NULL)
+        return;
+
+    const char* hiveRootString = HiveRootKeyToString(HiveRoot);
+
+    DWORD dwType;
+    DWORD dwDataLength = 0;
+    LPBYTE bdata = NULL;
+    lret = ADVAPI32$RegQueryValueExA(hKey, ValueName, NULL, &dwType, NULL, &dwDataLength);
+
+    if(lret != ERROR_SUCCESS && lret!= ERROR_MORE_DATA){
+        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to query value '%s' [error %d]\n", ValueName, lret);
+        ADVAPI32$RegCloseKey(hKey);
+        return;
+    }
+    else if (lret == ERROR_MORE_DATA){
+        bdata = (LPBYTE)KERNEL32$HeapAlloc(hHeap, 0, dwDataLength);
+        if(bdata == NULL){
+            BeaconPrintf(CALLBACK_ERROR, "breg: Failed to allocate %d bytes from process heap [error %d]\n", dwDataLength, KERNEL32$GetLastError());
+            ADVAPI32$RegCloseKey(hKey);
+            return;
+        }
+        lret = ADVAPI32$RegQueryValueExA(hKey, ValueName, NULL, &dwType, NULL, &dwDataLength);
+        if(lret != ERROR_SUCCESS){
+            BeaconPrintf(CALLBACK_ERROR, "breg: Failed to query value '%s' [error %d]\n", ValueName, lret);
+            KERNEL32$HeapFree(hHeap, 0, (LPVOID)bdata);
+            ADVAPI32$RegCloseKey(hKey);
             return;
         }
     }
+
+    formatp fpOutputAlloc;
+    DWORD rowSize = 2 + strlen(ValueName) + 4 + MAX_DATATYPE_STRING_LENGTH + 4 + dwDataLength + 2;
+    BeaconFormatAlloc(&fpOutputAlloc, 512 + (rowSize * 3));
+
+    const char* rootSeparator = (strlen(KeyName) == 0) ? "" : "\\";
+    const char* archString = ArchTypeToString(ArchType);
+    const char* computerString = ComputerName;
+    const char* computerNameSeparator = "\\";
+    if(ComputerName == NULL)
+        computerNameSeparator = computerString = "";
+
+    BeaconFormatPrintf(&fpOutputAlloc, "\n[%s%s%s%s%s] %s\n\n", computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, archString);
+    PrintRegistryKey(&fpOutputAlloc, ValueName, strlen(ValueName), dwType, dwDataLength, bdata, true);
+    //print output!
+    int iOutputLength;
+    char* beaconOutputString = BeaconFormatToString(&fpOutputAlloc, &iOutputLength);
+    BeaconOutput(CALLBACK_OUTPUT, beaconOutputString, iOutputLength + 1);
+
+    BeaconFormatFree(&fpOutputAlloc);
+    ADVAPI32$RegCloseKey(hKey);
+}
+
+void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName){    
+
+    HANDLE hHeap = KERNEL32$GetProcessHeap();
+
+    if(hHeap == NULL){
+        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to open process heap [error %d]\n", KERNEL32$GetLastError());
+        return;
+    }
+
+    LSTATUS lret;
+    HKEY hKey = OpenKeyHandle(ComputerName, HiveRoot, ArchType, KEY_READ, KeyName);
+    if(hKey == NULL)
+        return;
+
+    const char* hiveRootString = HiveRootKeyToString(HiveRoot);
 
     DWORD dwNumSubkeys;
     DWORD dwMaxSubkeyNameLength;
@@ -64,8 +149,9 @@ void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, LPCSTR KeyName){
     lret = ADVAPI32$RegQueryInfoKeyA(hKey, NULL, NULL, NULL, &dwNumSubkeys, &dwMaxSubkeyNameLength, NULL, &dwNumValues, &dwMaxValueNameLength, &dwMaxDataLength, NULL, NULL);
 
     if(lret != ERROR_SUCCESS){
-        BeaconPrintf(CALLBACK_OUTPUT, "[-] breg: Failed to query information of '%s\\%s' [error %d]\n", hiveRootString, KeyName, lret);
-            return;
+        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to query information of '%s\\%s' [error %d]\n", hiveRootString, KeyName, lret);
+        ADVAPI32$RegCloseKey(hKey);
+        return;
     }
 
     if(dwMaxValueNameLength < 9)
@@ -89,8 +175,13 @@ void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, LPCSTR KeyName){
     BeaconFormatAlloc(&fpOutputAlloc, outputLength);
 
     const char* rootSeparator = (strlen(KeyName) == 0) ? "" : "\\";
+    const char* archString = ArchTypeToString(ArchType);
+    const char* computerString = ComputerName;
+    const char* computerNameSeparator = "\\";
+    if(ComputerName == NULL)
+        computerNameSeparator = computerString = "";
 
-    BeaconFormatPrintf(&fpOutputAlloc, "\n[%s%s%s]\n\n", hiveRootString, rootSeparator, KeyName);
+    BeaconFormatPrintf(&fpOutputAlloc, "\n[%s%s%s%s%s] %s\n\n", computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, archString);
 
     //first enumerate the subkeys
     if(dwNumSubkeys == 0){
@@ -101,8 +192,10 @@ void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, LPCSTR KeyName){
         LPSTR subkeyName = (LPSTR)KERNEL32$HeapAlloc(hHeap, 0, dwMaxSubkeyNameLength + 1);
 
         if(subkeyName == NULL){
-            BeaconPrintf(CALLBACK_OUTPUT, "[-] breg: Failed to allocate %d bytes memory from process heap [error %d]\n", dwMaxSubkeyNameLength + 1, KERNEL32$GetLastError());
-                return;
+            BeaconPrintf(CALLBACK_ERROR, "breg: Failed to allocate %d bytes memory from process heap [error %d]\n", dwMaxSubkeyNameLength + 1, KERNEL32$GetLastError());
+            ADVAPI32$RegCloseKey(hKey);
+            BeaconFormatFree(&fpOutputAlloc);
+            return;
         }
 
         BeaconFormatPrintf(&fpOutputAlloc, "Subkeys [%d]:\n\n", dwNumSubkeys);
@@ -128,13 +221,18 @@ void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, LPCSTR KeyName){
 
         LPSTR valueName = (LPSTR)KERNEL32$HeapAlloc(hHeap, 0, dwMaxValueNameLength + 1);
         if(valueName == NULL){
-            BeaconPrintf(CALLBACK_OUTPUT, "[-] breg: Failed to allocate %d bytes memory from process heap [error %d]\n", dwMaxValueNameLength + 1, KERNEL32$GetLastError());
-                return;
+            BeaconPrintf(CALLBACK_ERROR, "breg: Failed to allocate %d bytes memory from process heap [error %d]\n", dwMaxValueNameLength + 1, KERNEL32$GetLastError());
+            ADVAPI32$RegCloseKey(hKey);
+            BeaconFormatFree(&fpOutputAlloc);
+            return;
         }
 
         LPBYTE bdata = (LPBYTE)KERNEL32$HeapAlloc(hHeap, 0, dwMaxDataLength);
         if(bdata == NULL){
+            BeaconPrintf(CALLBACK_ERROR, "breg: Failed to allocate %d bytes memory from process heap [error %d]\n", dwMaxDataLength, KERNEL32$GetLastError());
             KERNEL32$HeapFree(hHeap, 0, (LPVOID)valueName);
+            ADVAPI32$RegCloseKey(hKey);
+            BeaconFormatFree(&fpOutputAlloc);
             return;
         }
 
@@ -152,60 +250,7 @@ void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, LPCSTR KeyName){
                 continue;
             }
             
-            const char* dataTypeString = DataTypeToString(dwRegType);
-
-            if(dwRegType == REG_SZ || dwRegType == REG_EXPAND_SZ){
-                bdata[dataLength-1] = 0;
-                if(strlen(valueName) != 0)
-                    BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s%s\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", (LPSTR)bdata);
-                else
-                    BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s%s\n", "(default)", dwMaxValueNameLength - 9, "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", (LPSTR)bdata);
-            }
-            else if (dwRegType == REG_NONE)
-                BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s\n", "(default)", dwMaxValueNameLength - 9, "", dataTypeString);
-            else if(dwRegType == REG_DWORD)
-                BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s0x%x\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", *(PDWORD)bdata);
-            else if(dwRegType == REG_QWORD)
-                BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s0x%llx\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", *(PULONGLONG)bdata);
-            else if(dwRegType == REG_BINARY){
-                BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "");
-                DWORD maxindex = dataLength;
-                if(maxindex > 10)
-                    maxindex = 10;
-                for(int j = 0; j < maxindex; j++)
-                    BeaconFormatPrintf(&fpOutputAlloc, "%02X", bdata[j]);
-                if(maxindex != dataLength)
-                    BeaconFormatPrintf(&fpOutputAlloc, "... [%d total bytes]\n", dataLength);
-                else
-                    BeaconFormatPrintf(&fpOutputAlloc, " [%d bytes]\n", dataLength);
-            }
-            else if(dwRegType == REG_MULTI_SZ){
-
-                BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "");
-
-                bdata[dataLength-1] = 0;
-                DWORD offset = 0;
-                if(bdata[0] != 0){
-                    for(;;){
-                        LPSTR curString = (LPSTR)(bdata + offset);
-                        BeaconFormatPrintf(&fpOutputAlloc, "%s", curString);
-                        offset += strlen(curString) + 1;
-                        if(bdata[offset] == 0)
-                            break;
-                        BeaconFormatPrintf(&fpOutputAlloc, "~");
-                    }
-                }
-                BeaconFormatPrintf(&fpOutputAlloc, "\n");
-            }
-            else if(dwRegType == REG_LINK){
-                bdata[dataLength-1] = 0;
-                if(dataLength > 1)
-                    bdata[dataLength-2] = 0;
-                BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s%ls\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", (LPWSTR)bdata);
-            }
-            else{
-                BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s%s\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", "<not supported>");
-            }
+            PrintRegistryKey(&fpOutputAlloc, valueName, dwMaxValueNameLength, dwRegType, dataLength, bdata, false);
             
         }
 
@@ -220,14 +265,75 @@ void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, LPCSTR KeyName){
     int iOutputLength;
     char* beaconOutputString = BeaconFormatToString(&fpOutputAlloc, &iOutputLength);
     BeaconOutput(CALLBACK_OUTPUT, beaconOutputString, iOutputLength + 1);
+
+    BeaconFormatFree(&fpOutputAlloc);
+    ADVAPI32$RegCloseKey(hKey);
 }
 
-bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperation, LPCSTR *lpcRemoteComputerName, HKEY *pHiveRoot, LPCSTR *lpcKeyName, LPCSTR *lpcValueName, LPDWORD pdwDataType, LPBYTE *pbData, PLONGLONG pllDataNum, LPDWORD cbData){
+void PrintRegistryKey(formatp* pFormatObj, const char* valueName, DWORD dwMaxValueNameLength, DWORD dwRegType, DWORD dataLength, LPBYTE bdata, bool PrintFullBinaryData){
+    const char* dataTypeString = DataTypeToString(dwRegType);
+
+    if(dwRegType == REG_SZ || dwRegType == REG_EXPAND_SZ){
+        bdata[dataLength-1] = 0;
+        if(strlen(valueName) != 0)
+            BeaconFormatPrintf(pFormatObj, "  %s    %*s%s    %*s%s\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", (LPSTR)bdata);
+        else
+            BeaconFormatPrintf(pFormatObj, "  %s    %*s%s    %*s%s\n", "(default)", dwMaxValueNameLength - 9, "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", (LPSTR)bdata);
+    }
+    else if (dwRegType == REG_NONE)
+        BeaconFormatPrintf(pFormatObj, "  %s    %*s%s\n", "(default)", dwMaxValueNameLength - 9, "", dataTypeString);
+    else if(dwRegType == REG_DWORD)
+        BeaconFormatPrintf(pFormatObj, "  %s    %*s%s    %*s0x%x\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", *(PDWORD)bdata);
+    else if(dwRegType == REG_QWORD)
+        BeaconFormatPrintf(pFormatObj, "  %s    %*s%s    %*s0x%llx\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", *(PULONGLONG)bdata);
+    else if(dwRegType == REG_BINARY){
+        BeaconFormatPrintf(pFormatObj, "  %s    %*s%s    %*s", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "");
+        DWORD maxindex = dataLength;
+        if(!PrintFullBinaryData && maxindex > 10)
+            maxindex = 10;
+        for(int j = 0; j < maxindex; j++)
+            BeaconFormatPrintf(pFormatObj, "%02X", bdata[j]);
+        if(maxindex != dataLength)
+            BeaconFormatPrintf(pFormatObj, "... [%d total bytes]\n", dataLength);
+        else
+            BeaconFormatPrintf(pFormatObj, " [%d bytes]\n", dataLength);
+    }
+    else if(dwRegType == REG_MULTI_SZ){
+
+        BeaconFormatPrintf(pFormatObj, "  %s    %*s%s    %*s", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "");
+
+        bdata[dataLength-1] = 0;
+        DWORD offset = 0;
+        if(bdata[0] != 0){
+            for(;;){
+                LPSTR curString = (LPSTR)(bdata + offset);
+                BeaconFormatPrintf(pFormatObj, "%s", curString);
+                offset += strlen(curString) + 1;
+                if(bdata[offset] == 0)
+                    break;
+                BeaconFormatPrintf(pFormatObj, "#");
+            }
+        }
+        BeaconFormatPrintf(pFormatObj, "\n");
+    }
+    else if(dwRegType == REG_LINK){
+        bdata[dataLength-1] = 0;
+        if(dataLength > 1)
+            bdata[dataLength-2] = 0;
+        BeaconFormatPrintf(pFormatObj, "  %s    %*s%s    %*s%ls\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", (LPWSTR)bdata);
+    }
+    else{
+        BeaconFormatPrintf(pFormatObj, "  %s    %*s%s    %*s%s\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", "<not supported>");
+    }
+}
+
+bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperation, LPCSTR *lpcRemoteComputerName, HKEY *pHiveRoot, REGSAM *pArchType, LPCSTR *lpcKeyName, LPCSTR *lpcValueName, LPDWORD pdwDataType, LPBYTE *pbData, PLONGLONG pllDataNum, LPDWORD cbData){
     datap parser;
 
     char* regCommand;
     char* remoteComputerName;
     char* hiveRootString;
+    REGSAM archType;
     char* regKey;
     char* value;
     int dataType;
@@ -238,13 +344,14 @@ bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperat
     regCommand = BeaconDataExtract(&parser, NULL);
     remoteComputerName = BeaconDataExtract(&parser, NULL);
     hiveRootString = BeaconDataExtract(&parser, NULL);
+    archType = (REGSAM)BeaconDataInt(&parser);
     regKey = BeaconDataExtract(&parser, NULL);
     value = BeaconDataExtract(&parser, NULL);
     dataType = BeaconDataInt(&parser);
     data = BeaconDataExtract(&parser, NULL);
 
     if(regCommand == NULL || hiveRootString == NULL){
-        BeaconPrintf(CALLBACK_OUTPUT, "[-] Usage: breg <command> <key> [arguments]\n");
+        BeaconPrintf(CALLBACK_ERROR, "Usage: breg <command> <key> [arguments]\n");
         return false;
     }
 
@@ -259,7 +366,7 @@ bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperat
     else if( MSVCRT$_stricmp("HKCC", hiveRootString) == 0)
         *pHiveRoot = HKEY_CURRENT_CONFIG;
     else{
-        BeaconPrintf(CALLBACK_OUTPUT, "[-] breg: Unknown registry hive '%s'\n", hiveRootString);
+        BeaconPrintf(CALLBACK_ERROR, "breg: Unknown registry hive '%s'\n", hiveRootString);
         return false;
     }
 
@@ -270,9 +377,11 @@ bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperat
     else if( MSVCRT$_stricmp("query", regCommand) == 0)
         *pRegistryOperation = RegistryDeleteOperation;
     else{
-        BeaconPrintf(CALLBACK_OUTPUT, "[-] breg: Unknown command '%s'\n", regCommand);
+        BeaconPrintf(CALLBACK_ERROR, "breg: Unknown command '%s'\n", regCommand);
         return false;
     }
+
+    *pArchType = archType;
 
     if(remoteComputerName == NULL || strlen(remoteComputerName) > 0)
         *lpcRemoteComputerName = remoteComputerName;
@@ -310,7 +419,7 @@ bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperat
         *cbData = 8;
     }
     else{
-        BeaconPrintf(CALLBACK_OUTPUT, "[-] breg: Unknown datatype '%d'\n", dataType);
+        BeaconPrintf(CALLBACK_ERROR, "breg: Unknown datatype '%d'\n", dataType);
         return false;
     }
 
@@ -349,4 +458,12 @@ const char* DataTypeToString(DWORD regType){
     if(regType == REG_LINK)
         return "REG_LINK";
     return "REG_UNKNOWN";
+}
+
+const char* ArchTypeToString(REGSAM ArchType){
+    if(ArchType == KEY_WOW64_64KEY)
+        return "[WOW64_64KEY]";
+    else if (ArchType == KEY_WOW64_32KEY)
+        return "[WOW64_32KEY]";
+    return "";
 }
