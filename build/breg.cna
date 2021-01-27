@@ -1,7 +1,34 @@
 
+global('$ArgumentParsingError %RegistryTypes %HiveRootValues %ArchEnum');
+
+$ArgumentParsingError = "NobodyIsLikelyToIncludeThisAsAValueOnAnActualTargetMachineOkayLasagna";
+
+%RegistryTypes = %(
+	REG_NONE => 0,
+	REG_SZ => 1,
+	REG_EXPAND_SZ => 2,
+	REG_DWORD => 4,
+	REG_QWORD => 11
+);
+
+%HiveRootValues = %(
+	HKCR => 2147483648,
+	HKCU => 2147483649,
+	HKLM => 2147483650,
+	HKU  => 2147483651,
+	HKCC => 2147483653
+);
+
+%ArchEnum = %(
+	default => 0,
+	x64 => 256,
+	x86 => 512,
+	x32 => 512
+);
+
 alias breg{
 	
-	local('$barch $hBofFile $bofFileData $packedArgs $command $key $keyroot $value $emptyVal $dataType $data $hexstring');
+	local('$barch $hBofFile $bofFileData $packedArgs $command $basicValidationCheck $remoteComputerName $remoteComputerNameEndIndex $archString $arch $hiveRoot $hiveRootEndIndex $key $value $dataType $dataTypeNum $data $hexstring');
 
 	# figure out the arch of this session
 	$barch  = barch($1);
@@ -15,24 +42,29 @@ alias breg{
 		berror($1, "Usage: breg <command> <key> [options]");
 		return;
 	}
-
+	
 	$key = $3;
-	if( strlen($key) < 4 && (lc($key) !eq "hku") ){
-		berror($1, "breg: The registry key $key does not start with one of the following: HKLM, HKCU, HKCR, HKU, HKCC");
-		return;
+	$remoteComputerName = $null;
+
+	#check if remote registry
+	if($key ismatch "^\\\\\\\\(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\\-]*[A-Za-z0-9])\\\\(?i)(hklm|hkcu|hku|hkcr|hkcc)(\\\\.*)?"){
+		$remoteComputerNameEndIndex = indexOf($key, "\\", 2);
+		$remoteComputerName = substr($key, 0, $remoteComputerNameEndIndex);
+		$key = substr($key, $remoteComputerNameEndIndex + 1);
 	}
-	$keyroot = lc(substr($key, 0, 4));
-	if( ($keyroot !eq "hklm") && ($keyroot !eq "hkcu") && ($keyroot !eq "hkcr") && ($keyroot !eq "hku") && ($keyroot !eq "hkcc") && ($keyroot !eq "hku\\") ){
-		berror($1, "breg: The registry key \"$key\" does not start with one of the following: HKLM, HKCU, HKCR, HKU, HKCC");
+	else if ($key !ismatch "^(?i)(hklm|hkcu|hku|hkcr|hkcc)(\\\\.*)?"){
+		berror($1, "breg: \"$key\" is not a valid registry key");
 		return;
-	}
-	if( $keyroot eq "hku\\" ){
-		$keyroot = "hku";
 	}
 
-	if( (strlen($key) > strlen($keyroot)) && (charAt($key, strlen($keyroot)) !eq "\\" ) ){
-		berror($1, "breg: The character following root key \"" . uc($keyroot) . "\" must be a slash or end of string");
-		return;
+	$hiveRootEndIndex = indexOf($key, "\\", 0);
+	if($hiveRootEndIndex is $null){
+		$hiveRoot = $key;
+		$key = "";
+	}
+	else{
+		$hiveRoot = substr($key, 0, $hiveRootEndIndex);
+		$key = substr($key, $hiveRootEndIndex + 1);
 	}
 
 	if(lc($2) eq "query"){
@@ -49,222 +81,46 @@ alias breg{
 		return;
 	}
 
-	if($4 is $null){
-		$packedArgs = bof_pack($1, "zz", $command, $key);
-		btask($1, "Tasked beacon to run $0");
-		#TODO - add binline_execute
-		return;
-	}
-	else{
-		$value = $null;
-		$emptyVal = 0;
-		$dataType = $null;
-		$data = $null;
-		if(lc($4) eq "/v"){
-			$value = $5;
-			if($value is $null){
-				berror($1, "breg: a value must follow '/v'");
-				return;
-			}
-		}
-		else if (lc($4) eq "/d"){
-			if($command !eq "add"){
-				berror($1, "breg: the $command command does not support the '/d' argument");
-				return;
-			}
-			if($data !is $null){
-				berror($1, "breg: cannot specify '/d' more than once");
-				return;
-			}
-			if($5 is $null){
-				berror($1, "breg: a value must follow '/d'");
-				return;
-			}
-			$data = $5;
-		}
-		else if(lc($4) eq "/t"){
-			if($command !eq "add"){
-				berror($1, "breg: the $command command does not support the '/t' argument");
-				return;
-			}
-			if($dataType !is $null){
-				berror($1, "breg: cannot specify '/t' more than once");
-				return;
-			}
-			if($5 is $null){
-				berror($1, "breg: a value must follow '/t'");
-				return;
-			}
-			$dataType = uc($5);
-			if( ($dataType !eq "REG_SZ") && ($dataType !eq "REG_DWORD") && ($dataType !eq "REG_QWORD") && ($dataType !eq "REG_NONE")){
-				berror($1, "breg: The registry type must be one of the following: REG_SZ, REG_DWORD, REG_QWORD, REG_NONE");
-				return;
-			}
-		}
-		else{
-			berror($1, "breg: Unknown argument $4");
-			return;
-		}
+	$basicValidationCheck = BasicArgumentValidation($1, $4, $6, $8);
 
+	if($basicValidationCheck == 0){
+		return;
 	}
-	if($6 is $null){
-		if($command eq "query"){
-			if(strlen($value) == 0){
-				$emptyVal = 1;
-			}
-			$packedArgs = bof_pack($1, "zzzi", $command, $key, $value, $emptyVal);
-			btask($1, "Tasked beacon to run $0");
-			return;
-		}
-		else{
-			berror($1, "breg: if extra arguments are provided to the 'add' command then at least both '/v' and '/d' must be included, or '/v' must be included and '/t' must be REG_NONE");
-			return;
-		}
-	}
-	else{
-		if(lc($6) eq "/v"){
-			if($value !is $null){
-				berror($1, "breg: cannot specify '/v' more than once");
-				return;
-			}
-			$value = $7;
-			if($value is $null){
-				berror($1, "breg: a value must follow '/v'");
-				return;
-			}
-		}
-		else if (lc($6) eq "/d"){
-			if($command !eq "add"){
-				berror($1, "breg: the $command command does not support the '/d' argument");
-				return;
-			}
-			if($data !is $null){
-				berror($1, "breg: cannot specify '/d' more than once");
-				return;
-			}
-			if($7 is $null){
-				berror($1, "breg: a value must follow '/d'");
-				return;
-			}
-			$data = $7;
-		}
-		else if(lc($6) eq "/t"){
-			if($command !eq "add"){
-				berror($1, "breg: the $command command does not support the '/t' argument");
-				return;
-			}
-			if($dataType !is $null){
-				berror($1, "breg: cannot specify '/t' more than once");
-				return;
-			}
-			if($7 is $null){
-				berror($1, "breg: a value must follow '/t'");
-				return;
-			}
-			$dataType = uc($7);
-			if( ($dataType !eq "REG_SZ") && ($dataType !eq "REG_DWORD") && ($dataType !eq "REG_QWORD") && ($dataType !eq "REG_NONE")){
-				berror($1, "breg: The registry type must be one of the following: REG_SZ, REG_DWORD, REG_QWORD, REG_NONE");
-				return;
-			}
-		}
-		else{
-			berror($1, "breg: Unknown argument $6");
-			return;
-		}
 
-	}
-	if($8 is $null){
-		if($value is $null){
-			berror($1, "breg: If options are included then '/v' must not be null. If you are trying to emulate /ve then you must specify an empty string following '/v'");
-			return;
-		}
-		if( ($data is $null) && ($dataType !eq "REG_NONE") ){
-			berror($1, "breg: '/d' must be provided for data type $dataType");
-			return;
-		}
-		if($dataType is $null){
-			$dataType = "REG_SZ";
-		}
-		#now we can pack and send
-		if(strlen($value) == 0){
-			$emptyVal = 1;
-		}
-		if($dataType eq "REG_SZ"){
-			$packedArgs = bof_pack($1, "zzzizz", $command, $key, $value, $emptyVal, $dataType, $data);
-			btask($1, "Tasked beacon to run $0");
-			return;
-		}
-		else if($dataType eq "REG_NONE"){
-			$packedArgs = bof_pack($1, "zzziz", $command, $key, $value, $emptyVal, $dataType);
-			btask($1, "Tasked beacon to run $0");
-			return;
-		}
-	}
-	else{
-		if(lc($8) eq "/v"){
-			if($value !is $null){
-				berror($1, "breg: cannot specify '/v' more than once");
-				return;
-			}
-			$value = $9;
-			if($value is $null){
-				berror($1, "breg: a value must follow '/v'");
-				return;
-			}
-		}
-		else if (lc($8) eq "/d"){
-			if($data !is $null){
-				berror($1, "breg: cannot specify '/d' more than once");
-				return;
-			}
-			if($9 is $null){
-				berror($1, "breg: a value must follow '/d'");
-				return;
-			}
-			$data = $9;
-		}
-		else if(lc($8) eq "/t"){
-			if($dataType !is $null){
-				berror($1, "breg: cannot specify '/t' more than once");
-				return;
-			}
-			if($9 is $null){
-				berror($1, "breg: a value must follow '/t'");
-				return;
-			}
-			$dataType = uc($9);
-			if( ($dataType !eq "REG_SZ") && ($dataType !eq "REG_DWORD") && ($dataType !eq "REG_QWORD") && ($dataType !eq "REG_NONE")){
-				berror($1, "breg: The registry type must be one of the following: REG_SZ, REG_DWORD, REG_QWORD, REG_NONE");
-				return;
-			}
-		}
-		else{
-			berror($1, "breg: Unknown argument $8");
-			return;
-		}
+	$value = GetValueForArgument($1, "/v", $4, $5, $6, $7, $8, $9, $10, $11);
+	$data = GetValueForArgument($1, "/d", $4, $5, $6, $7, $8, $9, $10, $11);
+	$dataType = GetValueForArgument($1, "/t", $4, $5, $6, $7, $8, $9, $10, $11);
+	$archString = GetValueForArgument($1, "/a", $4, $5, $6, $7, $8, $9, $10, $11);
 
-	}
-	#at this point /v, /t , and /d have been entered so we just have to parse it
-	if( ($value is $null) || ($data is $null) || ($dataType is $null) ){
-		berror($1, "breg: somehow one of the arguments is still null. This is a bug");
+	if( ($value eq $ArgumentParsingError) || ($data eq $ArgumentParsingError) || ($dataType eq $ArgumentParsingError) ){
 		return;
 	}
-	if(strlen($value) == 0){
-		$emptyVal = 1;
-	}
-	if($dataType eq "REG_SZ"){
-		$packedArgs = bof_pack($1, "zzzizz", $command, $key, $value, $emptyVal, $dataType, $data);
-		btask($1, "Tasked beacon to run $0");
-		#TODO - binline_execute
+
+	if($value is $null && ( ($data !is $null) || ($dataType !is $null ))){
+		berror($1, "breg: '/v' cannot be null if specifying extra options");
 		return;
 	}
-	else if($dataType eq "REG_NONE"){
-		$packedArgs = bof_pack($1, "zzziz", $command, $key, $value, $emptyVal, $dataType);
-		btask($1, "Tasked beacon to run $0");
-		#TODO - binline_execute
+	if( ( ($command eq "query") || ($command eq "delete") )&& ( ($data !is $null) || ($dataType !is $null) ) ){
+		berror($1, "breg: the '" . $command . "' command only supports the '/v' argument");
 		return;
 	}
-	else if( ($dataType eq "REG_DWORD") || ($dataType eq "REG_QWORD") ){
+	if($dataType is $null){
+		$dataType = "REG_SZ";
+	}
+	$dataType = uc($dataType);
+	if( $dataType !in @( "REG_SZ", "REG_NONE", "REG_DWORD", "REG_QWORD" )){
+		berror($1, "breg: '/t' must be one of the following: REG_SZ, REG_NONE, REG_DWORD, or REG_QWORD");
+		return;
+	}
+	if( ($dataType eq "REG_NONE") && ($data !is $null) ){
+		berror($1, "breg: data must not be provided if type is REG_NONE");
+		return;
+	}
+	if( ($command eq "add") && ($dataType !eq "REG_NONE") && ($data is $null) ){
+		berror($1, "breg: data must be provided for type $dataType");
+		return;
+	}
+	if( ($dataType eq "REG_DWORD") || ($dataType eq "REG_QWORD") ){
 		if($data ismatch '0[xX][0-9a-fA-F]+'){
 			$hexstring = $data;
 			$data = formatNumber(substr($data, 2), 16, 10);
@@ -280,16 +136,123 @@ alias breg{
 			berror($1, "breg: $data [" . $hexstring . "] is larger than the max limit for type REG_DWORD");
 			return;
 		}
-		$packedArgs = bof_pack($1, "zzzizi", $command, $key, $value, $emptyVal, $dataType, $data);
-		btask($1, "Tasked beacon to run $0");
-		#TODO - binline_execute
-		return;
 	}
-	else{
-		berror($1, "breg: Somehow you provided a datatype of \"$dataType\" which shouldn't be allowed. This is a bug.");
-		return;
+	if($archString !is $null){
+		$archString = lc($archString);
+		if( ($archString !eq "x64") && ($archString !eq "x86") && ($archString !eq "x32") ){
+			berror($1, "breg: Architecture can only be 'x64' or 'x32'");
+			return;
+		}
 	}
 
+	$dataTypeNum = %RegistryTypes[$dataType];
+
+	$packedArgs = bof_pack($1, "zzzzziz", $command, $remoteComputerName, uc($hiveRoot), $key, $value, $dataTypeNum, $data);
+	btask($1, "Tasked beacon to run $0");
+	beacon_inline_execute($1, $bofFileData, "go", $packedArgs);
+}
+
+#$1 = beacon id
+#$2 = 4th command line argument
+#$3 = 6th command line argument
+#$4 = 8th command line argument
+#returns 1 if check passes, 0 if doesn't pass
+sub BasicArgumentValidation{
+	local('@validArguments $bid $arg4 $arg6 $arg8');
+
+	@validArguments = @( $null, "/v", "/t", "/d" );
+
+	$bid = $1;
+	$arg4 = lc($2);
+	$arg6 = lc($3);
+	$arg8 = lc($4);
+
+	if($arg4 !in @validArguments){
+		berror($bid, "breg: Unknown argument '" . $2 . "'");
+		return 0;
+	}
+	if($arg6 !in @validArguments){
+		berror($bid, "breg: Unknown argument '" . $3 . "'");
+		return 0;
+	}
+	if($arg8 !in @validArguments){
+		berror($bid, "breg: Unknown argument '" . $4 . "'");
+		return 0;
+	}
+
+	return 1;
+
+}
+
+#$1 = beacon id
+#$2 = the argument that's passed in
+#$3 = the 4th command line argument
+#$4 = the 5th command line argument
+#$5 = the 6th command line argument
+#$6 = the 7th command line argument
+#$7 = the 8th command line argument
+#$8 = the 9th command line argument
+#$9 = the 10th command line argument
+#$10 = the 11th command line argument
+#returns the value of that argument, $null if it does not exist, or $ArgumentParsingError if there is an error
+sub GetValueForArgument
+{
+	local('$bid $targetArgument $arg4 $arg5 $arg6 $arg7 $arg8 $arg9 $arg10 $arg11 $targetArgumentCount $value');
+
+	$bid = $1;
+	$targetArgument = lc($2);
+	$arg4 = lc($3);
+	$arg5 = $4;
+	$arg6 = lc($5);
+	$arg7 = $6;
+	$arg8 = lc($7);
+	$arg9 = $8;
+	$arg10 = lc($9);
+	$arg11 = $10;
+
+	$targetArgumentCount = 0;
+	$value = $null;
+
+	if($arg4 eq $targetArgument){
+		if($arg5 is $null){
+			berror($bid, "breg: A value must follow '" . $targetArgument . "'");
+			return $ArgumentParsingError;
+		}
+		$targetArgumentCount = $targetArgumentCount + 1;
+		$value = $arg5;
+	}
+	if($arg6 eq $targetArgument){
+		if($arg7 is $null){
+			berror($bid, "breg: A value must follow '" . $targetArgument . "'");
+			return $ArgumentParsingError;
+		}
+		$targetArgumentCount = $targetArgumentCount + 1;
+		$value = $arg7;
+	}
+	if($arg8 eq $targetArgument){
+		if($arg9 is $null){
+			berror($bid, "breg: A value must follow '" . $targetArgument . "'");
+			return $ArgumentParsingError;
+		}
+		$targetArgumentCount = $targetArgumentCount + 1;
+		$value = $arg9;
+	}
+	if($arg10 eq $targetArgument){
+		if($arg11 is $null){
+			berror($bid, "breg: A value must follow '" . $targetArgument . "'");
+			return $ArgumentParsingError;
+		}
+		$targetArgumentCount = $targetArgumentCount + 1;
+		$value = $arg11;
+	}
+	if($targetArgumentCount > 1){
+		berror($bid, "breg: '" . $targetArgument . "' may only be specified once");
+			return $ArgumentParsingError;
+	}
+	if($targetArgumentCount == 0){
+		return $null;
+	}
+	return $value;
 }
 
 beacon_command_register(
@@ -297,12 +260,12 @@ beacon_command_register(
 	"[+] Queries, adds, or deletes keys/values in the windows registry using a beacon object file",
 	"Queries, adds, or deletes keys/values in the windows registry using a beacon object file
 
-Usage: breg <command> <key> [/v value] [/t type] [/d data]
+Usage: breg <command> <key> [/v value] [/t type] [/d data] [/a arch]
    - command: 'query', 'add', or 'delete'. Other registry commands are not supported at this time
    - key: A windows registry key
       - If local must start with HKLM, HKCU, HKCR, HKU, or HKCC
       - If remote must be of the form \\\\computername\\hiveroot[\\subkey], where hiveroot is one of the aforementioned keys
    - value: A value to query, add, or delete if dealing with values. Specify an empty string to manipulate the default value of a key (equivalent to /ve)
-   - type: One of the following: REG_SZ, REG_NONE, REG_DWORD, REG_QWORD. Other types are not supported at this time. Default is REG_SZ
+   - type: One of the following: REG_SZ, REG_NONE, REG_DWORD, REG_QWORD, REG_EXPAND_SZ. Other types are not supported at this time. Default is REG_SZ
    - data: Data to add if adding a value. This value is required when adding a value unless the type is REG_NONE
 ");
