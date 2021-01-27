@@ -11,6 +11,7 @@
 DECLSPEC_IMPORT int MSVCRT$_stricmp(const char*, const char*);
 DECLSPEC_IMPORT int MSVCRT$atoi(const char*);
 DECLSPEC_IMPORT LONGLONG MSVCRT$_atoi64(const char*);
+DECLSPEC_IMPORT errno_t MSVCRT$strcpy_s(char* dest, rsize_t dest_size, const char* src);
 //kernel32 functions
 DECLSPEC_IMPORT DWORD WINAPI KERNEL32$GetLastError();
 DECLSPEC_IMPORT HANDLE WINAPI KERNEL32$GetProcessHeap();
@@ -36,6 +37,7 @@ typedef enum _REGISTRY_OPERATION{
 bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperation, LPCSTR *lpcRemoteComputerName, HKEY *pHiveRoot, REGSAM *pArchType, LPCSTR *lpcKeyName, LPCSTR *lpcValueName, LPDWORD pdwDataType, LPBYTE *pbData, PLONGLONG pllDataNum, LPDWORD cbData);
 HKEY OpenKeyHandle(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, ACCESS_MASK DesiredAccess, LPCSTR KeyName);
 void QueryKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName, LPCSTR ValueName);
+void QueryValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName, LPCSTR ValueName);
 void EnumerateKey(LPCSTR ComputerKey, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName);
 void PrintRegistryKey(formatp* pFormatObj, const char* valueName, DWORD dwMaxValueNameLength, DWORD dwRegType, DWORD dataLength, LPBYTE bdata, bool PrintFullBinaryData);
 const char* HiveRootKeyToString(HKEY HiveRoot);

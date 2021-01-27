@@ -28,7 +28,7 @@ void QueryKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyNam
     if(ValueName == NULL)
         EnumerateKey(ComputerName, HiveRoot, ArchType, KeyName);
     else
-        QueryKey(ComputerName, HiveRoot, ArchType, KeyName, ValueName);
+        QueryValue(ComputerName, HiveRoot, ArchType, KeyName, ValueName);
 }
 
 //returns a handle to the specified registry key, null if failure
@@ -61,7 +61,7 @@ HKEY OpenKeyHandle(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, ACCESS_M
 }
 
 void QueryValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName, LPCSTR ValueName){
-    
+
     HANDLE hHeap = KERNEL32$GetProcessHeap();
 
     if(hHeap == NULL){
@@ -81,45 +81,50 @@ void QueryValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyN
     LPBYTE bdata = NULL;
     lret = ADVAPI32$RegQueryValueExA(hKey, ValueName, NULL, &dwType, NULL, &dwDataLength);
 
+    const char* rootSeparator = (strlen(KeyName) == 0) ? "" : "\\";
+    const char* archString = ArchTypeToString(ArchType);
+    const char* computerString = ComputerName == NULL ? "" : ComputerName;
+    const char* computerNameSeparator = ComputerName == NULL ? "" : "\\";
+
     if(lret != ERROR_SUCCESS && lret!= ERROR_MORE_DATA){
-        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to query value '%s' [error %d]\n", ValueName, lret);
+        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to query value '%s' in key '%s%s%s%s%s' [error %d]\n", ValueName, computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, lret);
         ADVAPI32$RegCloseKey(hKey);
         return;
     }
-    else if (lret == ERROR_MORE_DATA){
-        bdata = (LPBYTE)KERNEL32$HeapAlloc(hHeap, 0, dwDataLength);
-        if(bdata == NULL){
-            BeaconPrintf(CALLBACK_ERROR, "breg: Failed to allocate %d bytes from process heap [error %d]\n", dwDataLength, KERNEL32$GetLastError());
-            ADVAPI32$RegCloseKey(hKey);
-            return;
-        }
-        lret = ADVAPI32$RegQueryValueExA(hKey, ValueName, NULL, &dwType, NULL, &dwDataLength);
-        if(lret != ERROR_SUCCESS){
-            BeaconPrintf(CALLBACK_ERROR, "breg: Failed to query value '%s' [error %d]\n", ValueName, lret);
-            KERNEL32$HeapFree(hHeap, 0, (LPVOID)bdata);
-            ADVAPI32$RegCloseKey(hKey);
-            return;
-        }
+
+    bdata = (LPBYTE)KERNEL32$HeapAlloc(hHeap, 0, dwDataLength);
+    if(bdata == NULL){
+        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to allocate %d bytes from process heap [error %d]\n", dwDataLength, KERNEL32$GetLastError());
+        ADVAPI32$RegCloseKey(hKey);
+        return;
+    }
+
+    lret = ADVAPI32$RegQueryValueExA(hKey, ValueName, NULL, &dwType, bdata, &dwDataLength);
+    if(lret != ERROR_SUCCESS){
+        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to query value '%s' in key '%s%s%s%s%s' [error %d]\n", ValueName, computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, lret);
+        KERNEL32$HeapFree(hHeap, 0, (LPVOID)bdata);
+        ADVAPI32$RegCloseKey(hKey);
+        return;
     }
 
     formatp fpOutputAlloc;
     DWORD rowSize = 2 + strlen(ValueName) + 4 + MAX_DATATYPE_STRING_LENGTH + 4 + dwDataLength + 2;
     BeaconFormatAlloc(&fpOutputAlloc, 512 + (rowSize * 3));
 
-    const char* rootSeparator = (strlen(KeyName) == 0) ? "" : "\\";
-    const char* archString = ArchTypeToString(ArchType);
-    const char* computerString = ComputerName;
-    const char* computerNameSeparator = "\\";
-    if(ComputerName == NULL)
-        computerNameSeparator = computerString = "";
-
     BeaconFormatPrintf(&fpOutputAlloc, "\n[%s%s%s%s%s] %s\n\n", computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, archString);
-    PrintRegistryKey(&fpOutputAlloc, ValueName, strlen(ValueName), dwType, dwDataLength, bdata, true);
-    //print output!
-    int iOutputLength;
+
+    const char* valString = strlen(ValueName) == 0 ? "(default)" : ValueName;
+
+    BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s%s\n", "Name", strlen(ValueName) - 4, "", "Type", MAX_DATATYPE_STRING_LENGTH - 4, "", "Data");
+    BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s%s\n", "----", strlen(ValueName) - 4, "", "----", MAX_DATATYPE_STRING_LENGTH - 4, "", "----");
+
+    PrintRegistryKey(&fpOutputAlloc, valString, strlen(ValueName), dwType, dwDataLength, bdata, true);
+    
+    int iOutputLength;  
     char* beaconOutputString = BeaconFormatToString(&fpOutputAlloc, &iOutputLength);
     BeaconOutput(CALLBACK_OUTPUT, beaconOutputString, iOutputLength + 1);
-
+    
+    KERNEL32$HeapFree(hHeap, 0, (LPVOID)bdata);
     BeaconFormatFree(&fpOutputAlloc);
     ADVAPI32$RegCloseKey(hKey);
 }
@@ -249,7 +254,8 @@ void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR Ke
                 BeaconFormatPrintf(&fpOutputAlloc, "  [error %d]\n", lret);
                 continue;
             }
-            
+            if(strlen(valueName) == 0)
+                MSVCRT$strcpy_s(valueName, dwMaxValueNameLength, "(default)");
             PrintRegistryKey(&fpOutputAlloc, valueName, dwMaxValueNameLength, dwRegType, dataLength, bdata, false);
             
         }
@@ -274,11 +280,13 @@ void PrintRegistryKey(formatp* pFormatObj, const char* valueName, DWORD dwMaxVal
     const char* dataTypeString = DataTypeToString(dwRegType);
 
     if(dwRegType == REG_SZ || dwRegType == REG_EXPAND_SZ){
+        if(dataLength == 0){
+            BeaconFormatPrintf(pFormatObj, "  %s    %*s%s", valueName, dwMaxValueNameLength, "");
+            return;
+        }
         bdata[dataLength-1] = 0;
-        if(strlen(valueName) != 0)
-            BeaconFormatPrintf(pFormatObj, "  %s    %*s%s    %*s%s\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", (LPSTR)bdata);
-        else
-            BeaconFormatPrintf(pFormatObj, "  %s    %*s%s    %*s%s\n", "(default)", dwMaxValueNameLength - 9, "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", (LPSTR)bdata);
+        BeaconFormatPrintf(pFormatObj, "  %s    %*s%s    %*s%s\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", (LPSTR)bdata);
+
     }
     else if (dwRegType == REG_NONE)
         BeaconFormatPrintf(pFormatObj, "  %s    %*s%s\n", "(default)", dwMaxValueNameLength - 9, "", dataTypeString);
