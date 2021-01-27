@@ -19,17 +19,126 @@ void go(char* args, int arglen){
         return;
 
     if(registryOperation == RegistryQueryOperation){
-        QueryKey(ComputerName, HiveRoot, ArchType, KeyName, ValueName);
+        if(ValueName == NULL)
+            EnumerateKey(ComputerName, HiveRoot, ArchType, KeyName);
+        else
+            QueryValue(ComputerName, HiveRoot, ArchType, KeyName, ValueName);;
+    }
+    else if (registryOperation == RegistryAddOperation){
+        if(ValueName == NULL)
+            AddKey(ComputerName, HiveRoot, ArchType, KeyName);
+        else
+            AddValue(ComputerName, HiveRoot, ArchType, KeyName, ValueName, DataType, DataSize, Data);
     }
 
 }
 
-void QueryKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName, LPCSTR ValueName){
-    if(ValueName == NULL)
-        EnumerateKey(ComputerName, HiveRoot, ArchType, KeyName);
-    else
-        QueryValue(ComputerName, HiveRoot, ArchType, KeyName, ValueName);
+void AddKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName){
+
+    const char* hiveRootString = HiveRootKeyToString(HiveRoot);
+    const char* rootSeparator = (strlen(KeyName) == 0) ? "" : "\\";
+    const char* archString = ArchTypeToString(ArchType);
+    const char* computerString = ComputerName == NULL ? "" : ComputerName;
+    const char* computerNameSeparator = ComputerName == NULL ? "" : "\\";
+
+    HKEY hHiveRoot = OpenKeyHandle(ComputerName, HiveRoot, ArchType, KEY_CREATE_SUB_KEY, NULL);
+    if(hHiveRoot == NULL)
+        return;
+
+    HKEY hNewKey;
+    DWORD dwDisposition;
+    LSTATUS lret = ADVAPI32$RegCreateKeyExA(hHiveRoot, KeyName, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hNewKey, &dwDisposition);
+
+    if(hHiveRoot != HiveRoot)   //we have to close it properly if it's a handle to a remote computer
+        ADVAPI32$RegCloseKey(hHiveRoot);
+
+    if(lret != ERROR_SUCCESS){
+        BeaconPrintf(CALLBACK_ERROR, "breg: failed to create key '%s%s%s%s%s' [error %d]", computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, lret);
+        return;
+    }
+
+    ADVAPI32$RegCloseKey(hNewKey);
+
+    if(dwDisposition == REG_OPENED_EXISTING_KEY){
+        BeaconPrintf(CALLBACK_ERROR, "breg: The key '%s%s%s%s%s' already exists\n", computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName);
+        return;
+    }
+
+    BeaconPrintf(CALLBACK_OUTPUT, "\n Created key '%s%s%s%s%s' %s\n\nDONE\n", computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, archString);
+
 }
+
+void AddValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName, LPCSTR ValueName, DWORD dwRegType, DWORD dataLength, LPBYTE bdata){
+
+    const char* hiveRootString = HiveRootKeyToString(HiveRoot);
+    const char* rootSeparator = (strlen(KeyName) == 0) ? "" : "\\";
+    const char* archString = ArchTypeToString(ArchType);
+    const char* computerString = ComputerName == NULL ? "" : ComputerName;
+    const char* computerNameSeparator = ComputerName == NULL ? "" : "\\";
+
+    HKEY hKey = OpenKeyHandle(ComputerName, HiveRoot, ArchType, KEY_QUERY_VALUE | KEY_SET_VALUE, KeyName);
+    if(hKey == NULL)
+        return;
+
+    
+
+    LSTATUS lret = ADVAPI32$RegQueryValueExA(hKey, ValueName, NULL, NULL, NULL, NULL);
+
+    const char* successOperationString = (lret == ERROR_SUCCESS) ? "Overwrote" : "Added";
+    const char* failOperationString = (lret == ERROR_SUCCESS) ? "overwrite" : "add";
+    const char* preposition = (lret == ERROR_SUCCESS) ? "in" : "to";
+
+    lret = ADVAPI32$RegSetValueExA(hKey, ValueName, 0, dwRegType, bdata, dataLength);
+
+    ADVAPI32$RegCloseKey(hKey);
+
+    if(lret != ERROR_SUCCESS){
+        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to %s value '%s' %s '%s%s%s%s%s' [error %d]\n", failOperationString, ValueName, preposition, computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, lret);
+        return;
+    }
+
+    BeaconPrintf(CALLBACK_OUTPUT, "\n %s value '%s' %s '%s%s%s%s%s'\n\nDONE\n", successOperationString, ValueName, preposition, computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName);
+
+}
+
+/*
+void AddKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR FullKeyName){
+
+    if(FullKeyName == NULL || strlen(FullKeyName) == 0){
+        BeaconPrintf(CALLBACK_ERROR, "breg: Cannot add root hive as key\n");
+        return;
+    }
+
+    bool addToRoot = false;
+    DWORD lastSlashOffset = 0;
+    const char* lastSlash = MSVCRT$strrchr((const char*) FullKeyName, '\\');
+
+    if(lastSlash == NULL)
+        addToRoot = true;
+    else{
+        lastSlashOffset = (DWORD)(lastSlash - FullKeyName);
+        if(lastSlashOffset == strlen(FullKeyName) - 1){
+            BeaconPrintf(CALLBACK_ERROR, "breg: The specified key cannot end in '\\'\n");
+            return;
+        }
+    }
+
+    //registry keys cannot be more than 255 chars
+    char ParentKeyName[256];
+    char ChildKeyName[256];
+    if(addToRoot){
+        ParentKeyName[0] = 0;
+        MSVCRT$strncpy_s(ChildKeyName, 256, FullKeyName, strlen(FullKeyName));
+    }
+    else{
+        MSVCRT$strncpy_s(ParentKeyName, 256, FullKeyName, lastSlashOffset);
+        MSVCRT$strncpy_s(ChildKeyName, 256, lastSlash + 1, strlen(FullKeyName) - lastSlashOffset - 1);
+    }
+
+    HKEY hParentKey = OpenKeyHandle(ComputerName, HiveRoot, ArchType, KEY_CREATE_SUB_KEY, ParentKey)
+    
+}
+*/
 
 //returns a handle to the specified registry key, null if failure
 HKEY OpenKeyHandle(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, ACCESS_MASK DesiredAccess, LPCSTR KeyName){
@@ -289,7 +398,7 @@ void PrintRegistryKey(formatp* pFormatObj, const char* valueName, DWORD dwMaxVal
 
     }
     else if (dwRegType == REG_NONE)
-        BeaconFormatPrintf(pFormatObj, "  %s    %*s%s\n", "(default)", dwMaxValueNameLength - 9, "", dataTypeString);
+        BeaconFormatPrintf(pFormatObj, "  %s    %*s%s\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString);
     else if(dwRegType == REG_DWORD)
         BeaconFormatPrintf(pFormatObj, "  %s    %*s%s    %*s0x%x\n", valueName, dwMaxValueNameLength - strlen(valueName), "", dataTypeString, MAX_DATATYPE_STRING_LENGTH - strlen(dataTypeString), "", *(PDWORD)bdata);
     else if(dwRegType == REG_QWORD)
@@ -412,7 +521,7 @@ bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperat
         *pbData = NULL;
         *cbData = 0;
     }
-    else if (dataType == REG_SZ){
+    else if (dataType == REG_SZ || dataType == REG_EXPAND_SZ){
         *pbData = data;
         *cbData = strlen(data) + 1;
     }
@@ -477,3 +586,4 @@ const char* ArchTypeToString(REGSAM ArchType){
         return "[WOW64_32KEY]";
     return "";
 }
+

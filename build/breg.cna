@@ -116,15 +116,15 @@ alias breg{
 		$dataType = "REG_SZ";
 	}
 	$dataType = uc($dataType);
-	if( $dataType !in @( "REG_SZ", "REG_NONE", "REG_DWORD", "REG_QWORD" )){
-		berror($1, "breg: '/t' must be one of the following: REG_SZ, REG_NONE, REG_DWORD, or REG_QWORD");
+	if( $dataType !in @( "REG_SZ", "REG_NONE", "REG_DWORD", "REG_QWORD", "REG_EXPAND_SZ" )){
+		berror($1, "breg: '/t' must be one of the following: REG_SZ, REG_NONE, REG_DWORD, REG_QWORD, or REG_EXPAND_SZ");
 		return;
 	}
 	if( ($dataType eq "REG_NONE") && ($data !is $null) ){
 		berror($1, "breg: data must not be provided if type is REG_NONE");
 		return;
 	}
-	if( ($command eq "add") && ($dataType !eq "REG_NONE") && ($data is $null) ){
+	if( ($command eq "add") && ($dataType !eq "REG_NONE") && ($data is $null) && ($value !is $null)){
 		berror($1, "breg: data must be provided for type $dataType");
 		return;
 	}
