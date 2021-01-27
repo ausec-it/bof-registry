@@ -115,10 +115,10 @@ void QueryValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyN
 
     const char* valString = strlen(ValueName) == 0 ? "(default)" : ValueName;
 
-    BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s%s\n", "Name", strlen(ValueName) - 4, "", "Type", MAX_DATATYPE_STRING_LENGTH - 4, "", "Data");
-    BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s%s\n", "----", strlen(ValueName) - 4, "", "----", MAX_DATATYPE_STRING_LENGTH - 4, "", "----");
+    BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s%s\n", "Name", strlen(valString) - 4, "", "Type", MAX_DATATYPE_STRING_LENGTH - 4, "", "Data");
+    BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s%s\n", "----", strlen(valString) - 4, "", "----", MAX_DATATYPE_STRING_LENGTH - 4, "", "----");
 
-    PrintRegistryKey(&fpOutputAlloc, valString, strlen(ValueName), dwType, dwDataLength, bdata, true);
+    PrintRegistryKey(&fpOutputAlloc, valString, strlen(valString), dwType, dwDataLength, bdata, true);
     
     int iOutputLength;  
     char* beaconOutputString = BeaconFormatToString(&fpOutputAlloc, &iOutputLength);
@@ -344,6 +344,7 @@ bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperat
     REGSAM archType;
     char* regKey;
     char* value;
+    int emptyValue;
     int dataType;
     char* data;
 
@@ -355,6 +356,7 @@ bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperat
     archType = (REGSAM)BeaconDataInt(&parser);
     regKey = BeaconDataExtract(&parser, NULL);
     value = BeaconDataExtract(&parser, NULL);
+    emptyValue = BeaconDataInt(&parser);
     dataType = BeaconDataInt(&parser);
     data = BeaconDataExtract(&parser, NULL);
 
@@ -400,10 +402,10 @@ bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperat
         regKey = "";
     *lpcKeyName = regKey;
 
-    if(value == NULL || strlen(value) > 0)
-        *lpcValueName = value;
-    else
+    if(emptyValue == 1)
         *lpcValueName = NULL;
+    else
+        *lpcValueName = value;
 
     *pdwDataType = dataType;
     if(dataType == REG_NONE){

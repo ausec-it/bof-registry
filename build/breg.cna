@@ -31,7 +31,7 @@ $ArgumentParsingError = "NobodyIsLikelyToIncludeThisAsAValueOnAnActualTargetMach
 
 alias breg{
 	
-	local('$barch $hBofFile $bofFileData $packedArgs $command $basicValidationCheck $remoteComputerName $remoteComputerNameEndIndex $archString $arch $hiveRoot $hiveRootEndIndex $key $value $dataType $dataTypeNum $data $hexstring');
+	local('$barch $hBofFile $bofFileData $packedArgs $command $basicValidationCheck $remoteComputerName $remoteComputerNameEndIndex $archString $arch $hiveRoot $hiveRootEndIndex $key $value $emptyVal $dataType $dataTypeNum $data $hexstring');
 
 	# figure out the arch of this session
 	$barch  = barch($1);
@@ -95,8 +95,13 @@ alias breg{
 	$dataType = GetValueForArgument($1, "/t", $4, $5, $6, $7, $8, $9, $10, $11);
 	$archString = GetValueForArgument($1, "/a", $4, $5, $6, $7, $8, $9, $10, $11);
 
-	if( ($value eq $ArgumentParsingError) || ($data eq $ArgumentParsingError) || ($dataType eq $ArgumentParsingError) ){
+	if( ($value eq $ArgumentParsingError) || ($data eq $ArgumentParsingError) || ($dataType eq $ArgumentParsingError) || ($archString eq $ArgumentParsingError) ){
 		return;
+	}
+
+	$emptyVal = 0;
+	if($value is $null){
+		$emptyVal = 1;
 	}
 
 	if($value is $null && ( ($data !is $null) || ($dataType !is $null ))){
@@ -154,7 +159,7 @@ alias breg{
 	$arch = %ArchEnum[$archString];
 	$dataTypeNum = %RegistryTypes[$dataType];
 
-	$packedArgs = bof_pack($1, "zzzizziz", $command, $remoteComputerName, uc($hiveRoot), $arch, $key, $value, $dataTypeNum, $data);
+	$packedArgs = bof_pack($1, "zzzizziiz", $command, $remoteComputerName, uc($hiveRoot), $arch, $key, $value, $emptyVal, $dataTypeNum, $data);
 	btask($1, "Tasked beacon to run $0");
 	beacon_inline_execute($1, $bofFileData, "go", $packedArgs);
 }
