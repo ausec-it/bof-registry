@@ -4,6 +4,8 @@ A beacon object file for use with cobalt strike v4.1+. Supports querying, adding
 
 ## Usage
 
+To use the breg command just load `breg.cna` into your cobalt strike client.
+
 ```
 beacon> help breg
 Queries, adds, or deletes keys/values in the windows registry using a beacon object file
