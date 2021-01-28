@@ -141,3 +141,6 @@ DONE
 - The '#' character is used to delineate strings within type REG_MULTI_SZ
 - the `breg add` command will overwrite a value if it already exists when adding a value
 - the `breg delete` command will delete all subkeys and values of a key if deleting a key (if deleting a value only the one value is deleted)
+
+## Misc: Helper Function
+There is a helper function `breg_add_string_value` that can be called by a separate alias or function to add a string value to a registry. This could be used to enhance the stealthiness of an existing script that adds registry values (for example a script that establishes persistence). An example alias that calls the function is included at the bottom of `breg.cna`. At the moment the only helper function that exists is one that adds strings.
