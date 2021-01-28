@@ -92,7 +92,7 @@ void DeleteKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR FullK
         return;
     }
 
-    BeaconPrintf(CALLBACK_OUTPUT, "\nDeleted key '%s%s%s%s%s' %s\n\nDONE\n", computerString, computerNameSeparator, hiveRootString, rootSeparator, FullKeyName, archString);
+    BeaconPrintf(CALLBACK_OUTPUT, "\n Deleted key '%s%s%s%s%s' %s\n\nDONE\n", computerString, computerNameSeparator, hiveRootString, rootSeparator, FullKeyName, archString);
 
 }
 
@@ -117,7 +117,7 @@ void DeleteValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR Key
         return;
     }
     
-    BeaconPrintf(CALLBACK_OUTPUT, "Deleted value '%s' from '%s%s%s%s%s' %s\n", ValueName, computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, archString);
+    BeaconPrintf(CALLBACK_OUTPUT, "\n Deleted value '%s' from '%s%s%s%s%s' %s\n\nDONE\n", ValueName, computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, archString);
 
 }
 
@@ -285,6 +285,8 @@ void QueryValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyN
 
     PrintRegistryValue(&fpOutputAlloc, valString, strlen(valString), dwType, dwDataLength, bdata, true);
     
+    BeaconFormatPrintf(&fpOutputAlloc, "\nDONE\n");
+
     int iOutputLength;  
     char* beaconOutputString = BeaconFormatToString(&fpOutputAlloc, &iOutputLength);
     BeaconOutput(CALLBACK_OUTPUT, beaconOutputString, iOutputLength + 1);
@@ -292,6 +294,7 @@ void QueryValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyN
     KERNEL32$HeapFree(hHeap, 0, (LPVOID)bdata);
     BeaconFormatFree(&fpOutputAlloc);
     ADVAPI32$RegCloseKey(hKey);
+
 }
 
 void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName){    
