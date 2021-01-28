@@ -215,7 +215,18 @@ HKEY OpenKeyHandle(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, ACCESS_M
         }
     }
     else{
-        lret = ADVAPI32$RegOpenKeyExA(HiveRoot, KeyName, 0, ArchType | DesiredAccess, &hKey);
+        if(HiveRoot != HKEY_CURRENT_USER)
+            lret = ADVAPI32$RegOpenKeyExA(HiveRoot, KeyName, 0, ArchType | DesiredAccess, &hKey);
+        else{
+            HKEY hCurrentUserRoot;
+            lret = ADVAPI32$RegOpenCurrentUser(ArchType | DesiredAccess, &hCurrentUserRoot);
+            if(lret != ERROR_SUCCESS){
+                BeaconPrintf(CALLBACK_ERROR, "breg: Opening of HKCU of current user failed [error %d]\n", lret);
+                return NULL;
+            }
+            lret = ADVAPI32$RegOpenKeyExA(hCurrentUserRoot, KeyName, 0, ArchType | DesiredAccess, &hKey);
+            ADVAPI32$RegCloseKey(hCurrentUserRoot);
+        }
         if(lret != ERROR_SUCCESS){
             BeaconPrintf(CALLBACK_ERROR, "breg: Failed to open '%s%s%s\\%s' [error %d]\n", computerString, computerNameSeparator, hiveRootString, KeyName, lret);
             return NULL;

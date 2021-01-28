@@ -57,12 +57,23 @@ DONE
 
 Deleting a key:
 ```
-beacon> breg delete HKCU\TestKey2
-[*] Tasked beacon to run breg delete HKCU\TestKey2
-[+] host called home, sent: 12233 bytes
+beacon> breg query "HKCU\Key With Space"
+[*] Tasked beacon to run breg query "HKCU\Key With Space"
+[+] host called home, sent: 12266 bytes
 [+] received output:
 
- Deleted key 'HKCU\TestKey2' 
+[HKCU\Key With Space] 
+
+Subkeys [2]:
+
+  HKCU\Key With Space\Subkey1
+  HKCU\Key With Space\Subkey2
+
+Values [1]:
+
+  Name         Type             Data
+  ----         ----             ----
+  Value1       REG_SZ           My Data
 
 DONE
 ```
