@@ -282,3 +282,71 @@ Usage: breg <command> <key> [/v value] [/t type] [/d data] [/a arch]
    - data: Data to add if adding a value. This value is required when adding a value unless the type is REG_NONE
    - arch: The version of the registry to check. Can be 'x64' or 'x32'. Default is the arch of the current beacon
 ");
+
+#helper functions that you can call from other script_resource
+
+
+#Adds a string registry key to the local computer
+	#$1 = beacon id
+	#$2 = key
+	#$3 = value name ("" or $null to set the default entry)
+	#$4 = string to add
+	#$5 = arch ('x64', 'x32', or leave as null for default)
+#example alias below this function
+sub breg_add_string_value{
+
+	local('$barch $hBofFile $bofFileData $bid $fullkey $key $value $emptyVal $data $archString $hiveRoot $hiveRootEndIndex');
+
+	# figure out the arch of this session
+	$barch  = barch($1);
+	
+	# read in the right BOF file
+	$hBofFile = openf(script_resource("breg. $+ $barch $+ .o"));
+	$bofFileData   = readb($hBofFile, -1);
+	closef($hBofFile);
+
+	$bid = $1;
+	$key = $2;
+	$value = $3;
+	$data = $4;
+	$archString = $5;
+
+	$fullkey = $key;
+
+	$hiveRootEndIndex = indexOf($key, "\\", 0);
+	if($hiveRootEndIndex is $null){
+		$hiveRoot = $key;
+		$key = "";
+	}
+	else{
+		$hiveRoot = substr($key, 0, $hiveRootEndIndex);
+		$key = substr($key, $hiveRootEndIndex + 1);
+	}
+
+	$emptyVal = 0;
+	if( ($value is $null) || (strlen($value) == 0) ){
+		$emptyVal = 1;
+	}
+
+	if( ($archString is $null) || (strlen($archString) == 0) ){
+		$archString = "default";
+		$arch = %ArchEnum[$archString];
+	}
+	else if ($archString !in %ArchEnum){
+		berror($bid, "breg_add_string_value: Unknown arch \"$arch\"");
+		return;
+	}
+	else{
+		$arch = %ArchEnum[$archString];
+	}
+
+	$packedArgs = bof_pack($bid, "zzzizziiz", "add", $null, uc($hiveRoot), $arch, $key, $value, $emptyVal, %RegistryTypes["REG_SZ"], $data);
+	btask($1, "Tasked beacon to add REG_SZ value \"$value\" => \"$data\" to registry key \"$fullkey\" [arch " . $archString . "]");
+	beacon_inline_execute($1, $bofFileData, "go", $packedArgs);
+}
+
+#an example alias to use the above function
+#alias add_runkey_persistence{
+#	breg_add_string_value($1, "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "MyRunKey", "C:\\path\\file.exe");
+#}
+
