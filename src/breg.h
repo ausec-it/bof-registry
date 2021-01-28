@@ -28,6 +28,9 @@ DECLSPEC_IMPORT LSTATUS WINAPI ADVAPI32$RegCloseKey(HKEY);
 DECLSPEC_IMPORT LSTATUS WINAPI ADVAPI32$RegQueryValueExA(HKEY, LPCSTR, LPDWORD, LPDWORD, LPBYTE, LPDWORD);
 DECLSPEC_IMPORT LSTATUS WINAPI ADVAPI32$RegCreateKeyExA(HKEY, LPCSTR, DWORD, LPSTR, DWORD, REGSAM, const LPSECURITY_ATTRIBUTES, PHKEY, LPDWORD);
 DECLSPEC_IMPORT LSTATUS WINAPI ADVAPI32$RegSetValueExA(HKEY, LPCSTR, DWORD, DWORD, const BYTE*, DWORD);
+DECLSPEC_IMPORT LSTATUS WINAPI ADVAPI32$RegDeleteTreeA(HKEY, LPCSTR);
+DECLSPEC_IMPORT LSTATUS WINAPI ADVAPI32$RegDeleteValueA(HKEY, LPCSTR);
+DECLSPEC_IMPORT LSTATUS WINAPI ADVAPI32$RegConnectRegistryA(LPCSTR, HKEY, PHKEY);
 
 #pragma endregion
 
@@ -41,9 +44,11 @@ bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperat
 HKEY OpenKeyHandle(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, ACCESS_MASK DesiredAccess, LPCSTR KeyName);
 void QueryValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName, LPCSTR ValueName);
 void EnumerateKey(LPCSTR ComputerKey, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName);
-void PrintRegistryKey(formatp* pFormatObj, const char* valueName, DWORD dwMaxValueNameLength, DWORD dwRegType, DWORD dataLength, LPBYTE bdata, bool PrintFullBinaryData);
+void PrintRegistryValue(formatp* pFormatObj, const char* valueName, DWORD dwMaxValueNameLength, DWORD dwRegType, DWORD dataLength, LPBYTE bdata, bool PrintFullBinaryData);
 void AddKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName);
 void AddValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName, LPCSTR ValueName, DWORD dwRegType, DWORD dataLength, LPBYTE bdata);
+void DeleteKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR FullKeyName);
+void DeleteValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName, LPCSTR ValueName);
 const char* HiveRootKeyToString(HKEY HiveRoot);
 const char* DataTypeToString(DWORD regType);
 const char* ArchTypeToString(REGSAM ArchType);

@@ -30,6 +30,94 @@ void go(char* args, int arglen){
         else
             AddValue(ComputerName, HiveRoot, ArchType, KeyName, ValueName, DataType, DataSize, Data);
     }
+    else if (registryOperation == RegistryDeleteOperation){
+        if(ValueName == NULL)
+            DeleteKey(ComputerName, HiveRoot, ArchType, KeyName);
+        else
+            DeleteValue(ComputerName, HiveRoot, ArchType, KeyName, ValueName);
+    }
+
+}
+
+void DeleteKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR FullKeyName){
+
+    if(FullKeyName == NULL || strlen(FullKeyName) == 0){
+        BeaconPrintf(CALLBACK_ERROR, "breg: Cannot add root hive as key\n");
+        return;
+    }
+
+    bool deleteFromRoot = false;
+    DWORD lastSlashOffset = 0;
+    const char* lastSlash = MSVCRT$strrchr((const char*) FullKeyName, '\\');
+
+    if(lastSlash == NULL)
+        deleteFromRoot = true;
+    else{
+        lastSlashOffset = (DWORD)(lastSlash - FullKeyName);
+        if(lastSlashOffset == strlen(FullKeyName) - 1){
+            BeaconPrintf(CALLBACK_ERROR, "breg: The specified key cannot end in '\\'\n");
+            return;
+        }
+    }
+
+    //registry keys cannot be more than 255 chars
+    char ParentKeyName[256];
+    char ChildKeyName[256];
+    if(deleteFromRoot){
+        ParentKeyName[0] = 0;
+        MSVCRT$strncpy_s(ChildKeyName, 256, FullKeyName, strlen(FullKeyName));
+    }
+    else{
+        MSVCRT$strncpy_s(ParentKeyName, 256, FullKeyName, lastSlashOffset);
+        MSVCRT$strncpy_s(ChildKeyName, 256, lastSlash + 1, strlen(FullKeyName) - lastSlashOffset - 1);
+    }
+
+    HKEY hParentKey = OpenKeyHandle(ComputerName, HiveRoot, ArchType, DELETE | KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE, ParentKeyName);
+
+    if(hParentKey == NULL)
+        return;
+
+    const char* hiveRootString = HiveRootKeyToString(HiveRoot);
+    const char* rootSeparator = (strlen(FullKeyName) == 0) ? "" : "\\";
+    const char* archString = ArchTypeToString(ArchType);
+    const char* computerString = ComputerName == NULL ? "" : ComputerName;
+    const char* computerNameSeparator = ComputerName == NULL ? "" : "\\";
+
+    LSTATUS lret = ADVAPI32$RegDeleteTreeA(hParentKey, ChildKeyName);
+
+    ADVAPI32$RegCloseKey(hParentKey);
+
+    if(lret != ERROR_SUCCESS){
+        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to delete key '%s%s%s%s%s' %s [error %d]\n", computerString, computerNameSeparator, hiveRootString, rootSeparator, FullKeyName, archString, lret);
+        return;
+    }
+
+    BeaconPrintf(CALLBACK_OUTPUT, "\nDeleted key '%s%s%s%s%s' %s\n\nDONE\n", computerString, computerNameSeparator, hiveRootString, rootSeparator, FullKeyName, archString);
+
+}
+
+void DeleteValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName, LPCSTR ValueName){
+
+    const char* hiveRootString = HiveRootKeyToString(HiveRoot);
+    const char* rootSeparator = (strlen(KeyName) == 0) ? "" : "\\";
+    const char* archString = ArchTypeToString(ArchType);
+    const char* computerString = ComputerName == NULL ? "" : ComputerName;
+    const char* computerNameSeparator = ComputerName == NULL ? "" : "\\";
+
+    HKEY hKey = OpenKeyHandle(ComputerName, HiveRoot, ArchType, KEY_SET_VALUE , KeyName);
+    if(hKey == NULL)
+        return;
+
+    LSTATUS lret = ADVAPI32$RegDeleteValueA(hKey, ValueName);
+
+    ADVAPI32$RegCloseKey(hKey);
+
+    if(lret != ERROR_SUCCESS){
+        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to delete value '%s' from '%s%s%s%s%s' %s [error %d]\n", ValueName, computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, archString, lret);
+        return;
+    }
+    
+    BeaconPrintf(CALLBACK_OUTPUT, "Deleted value '%s' from '%s%s%s%s%s' %s\n", ValueName, computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, archString);
 
 }
 
@@ -53,14 +141,14 @@ void AddKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyName)
         ADVAPI32$RegCloseKey(hHiveRoot);
 
     if(lret != ERROR_SUCCESS){
-        BeaconPrintf(CALLBACK_ERROR, "breg: failed to create key '%s%s%s%s%s' [error %d]", computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, lret);
+        BeaconPrintf(CALLBACK_ERROR, "breg: failed to create key '%s%s%s%s%s' %s [error %d]", computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, archString, lret);
         return;
     }
 
     ADVAPI32$RegCloseKey(hNewKey);
 
     if(dwDisposition == REG_OPENED_EXISTING_KEY){
-        BeaconPrintf(CALLBACK_ERROR, "breg: The key '%s%s%s%s%s' already exists\n", computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName);
+        BeaconPrintf(CALLBACK_ERROR, "breg: The key '%s%s%s%s%s' %s already exists\n", computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, archString);
         return;
     }
 
@@ -80,8 +168,6 @@ void AddValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyNam
     if(hKey == NULL)
         return;
 
-    
-
     LSTATUS lret = ADVAPI32$RegQueryValueExA(hKey, ValueName, NULL, NULL, NULL, NULL);
 
     const char* successOperationString = (lret == ERROR_SUCCESS) ? "Overwrote" : "Added";
@@ -93,52 +179,13 @@ void AddValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyNam
     ADVAPI32$RegCloseKey(hKey);
 
     if(lret != ERROR_SUCCESS){
-        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to %s value '%s' %s '%s%s%s%s%s' [error %d]\n", failOperationString, ValueName, preposition, computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, lret);
+        BeaconPrintf(CALLBACK_ERROR, "breg: Failed to %s value '%s' %s '%s%s%s%s%s' %s [error %d]\n", failOperationString, ValueName, preposition, computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, archString, lret);
         return;
     }
 
-    BeaconPrintf(CALLBACK_OUTPUT, "\n %s value '%s' %s '%s%s%s%s%s'\n\nDONE\n", successOperationString, ValueName, preposition, computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName);
+    BeaconPrintf(CALLBACK_OUTPUT, "\n %s value '%s' %s '%s%s%s%s%s' %s\n\nDONE\n", successOperationString, ValueName, preposition, computerString, computerNameSeparator, hiveRootString, rootSeparator, KeyName, archString);
 
 }
-
-/*
-void AddKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR FullKeyName){
-
-    if(FullKeyName == NULL || strlen(FullKeyName) == 0){
-        BeaconPrintf(CALLBACK_ERROR, "breg: Cannot add root hive as key\n");
-        return;
-    }
-
-    bool addToRoot = false;
-    DWORD lastSlashOffset = 0;
-    const char* lastSlash = MSVCRT$strrchr((const char*) FullKeyName, '\\');
-
-    if(lastSlash == NULL)
-        addToRoot = true;
-    else{
-        lastSlashOffset = (DWORD)(lastSlash - FullKeyName);
-        if(lastSlashOffset == strlen(FullKeyName) - 1){
-            BeaconPrintf(CALLBACK_ERROR, "breg: The specified key cannot end in '\\'\n");
-            return;
-        }
-    }
-
-    //registry keys cannot be more than 255 chars
-    char ParentKeyName[256];
-    char ChildKeyName[256];
-    if(addToRoot){
-        ParentKeyName[0] = 0;
-        MSVCRT$strncpy_s(ChildKeyName, 256, FullKeyName, strlen(FullKeyName));
-    }
-    else{
-        MSVCRT$strncpy_s(ParentKeyName, 256, FullKeyName, lastSlashOffset);
-        MSVCRT$strncpy_s(ChildKeyName, 256, lastSlash + 1, strlen(FullKeyName) - lastSlashOffset - 1);
-    }
-
-    HKEY hParentKey = OpenKeyHandle(ComputerName, HiveRoot, ArchType, KEY_CREATE_SUB_KEY, ParentKey)
-    
-}
-*/
 
 //returns a handle to the specified registry key, null if failure
 HKEY OpenKeyHandle(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, ACCESS_MASK DesiredAccess, LPCSTR KeyName){
@@ -154,9 +201,18 @@ HKEY OpenKeyHandle(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, ACCESS_M
         computerNameSeparator = computerString = "";
 
     if(ComputerName != NULL){
-        //todo - add remote support
-        BeaconPrintf(CALLBACK_OUTPUT, "Remote Not Supported\n");
-        return NULL;
+        HKEY hRemoteRoot;
+        lret = ADVAPI32$RegConnectRegistryA(ComputerName, HiveRoot, &hRemoteRoot);
+        if(lret != ERROR_SUCCESS){
+            BeaconPrintf(CALLBACK_ERROR, "breg: Failed to connect to '%s%s%s' [error %d]\n", computerString, computerNameSeparator, hiveRootString, lret);
+            return NULL;
+        }
+        lret = ADVAPI32$RegOpenKeyExA(hRemoteRoot, KeyName, 0, ArchType | DesiredAccess, &hKey);
+        ADVAPI32$RegCloseKey(hRemoteRoot);
+        if(lret != ERROR_SUCCESS){
+            BeaconPrintf(CALLBACK_ERROR, "breg: Connection succeeded but failed to open key '%s%s%s\\%s' [error %d]\n", computerString, computerNameSeparator, hiveRootString, KeyName, lret);
+            return NULL;
+        }
     }
     else{
         lret = ADVAPI32$RegOpenKeyExA(HiveRoot, KeyName, 0, ArchType | DesiredAccess, &hKey);
@@ -227,7 +283,7 @@ void QueryValue(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR KeyN
     BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s%s\n", "Name", strlen(valString) - 4, "", "Type", MAX_DATATYPE_STRING_LENGTH - 4, "", "Data");
     BeaconFormatPrintf(&fpOutputAlloc, "  %s    %*s%s    %*s%s\n", "----", strlen(valString) - 4, "", "----", MAX_DATATYPE_STRING_LENGTH - 4, "", "----");
 
-    PrintRegistryKey(&fpOutputAlloc, valString, strlen(valString), dwType, dwDataLength, bdata, true);
+    PrintRegistryValue(&fpOutputAlloc, valString, strlen(valString), dwType, dwDataLength, bdata, true);
     
     int iOutputLength;  
     char* beaconOutputString = BeaconFormatToString(&fpOutputAlloc, &iOutputLength);
@@ -332,7 +388,6 @@ void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR Ke
         BeaconFormatPrintf(&fpOutputAlloc, "\n[No Values]\n");
     }
     else{
-
         LPSTR valueName = (LPSTR)KERNEL32$HeapAlloc(hHeap, 0, dwMaxValueNameLength + 1);
         if(valueName == NULL){
             BeaconPrintf(CALLBACK_ERROR, "breg: Failed to allocate %d bytes memory from process heap [error %d]\n", dwMaxValueNameLength + 1, KERNEL32$GetLastError());
@@ -364,8 +419,8 @@ void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR Ke
                 continue;
             }
             if(strlen(valueName) == 0)
-                MSVCRT$strcpy_s(valueName, dwMaxValueNameLength, "(default)");
-            PrintRegistryKey(&fpOutputAlloc, valueName, dwMaxValueNameLength, dwRegType, dataLength, bdata, false);
+                MSVCRT$strcpy_s(valueName, dwMaxValueNameLength + 1, "(default)");
+            PrintRegistryValue(&fpOutputAlloc, valueName, dwMaxValueNameLength, dwRegType, dataLength, bdata, false);
             
         }
 
@@ -385,7 +440,7 @@ void EnumerateKey(LPCSTR ComputerName, HKEY HiveRoot, REGSAM ArchType, LPCSTR Ke
     ADVAPI32$RegCloseKey(hKey);
 }
 
-void PrintRegistryKey(formatp* pFormatObj, const char* valueName, DWORD dwMaxValueNameLength, DWORD dwRegType, DWORD dataLength, LPBYTE bdata, bool PrintFullBinaryData){
+void PrintRegistryValue(formatp* pFormatObj, const char* valueName, DWORD dwMaxValueNameLength, DWORD dwRegType, DWORD dataLength, LPBYTE bdata, bool PrintFullBinaryData){
     const char* dataTypeString = DataTypeToString(dwRegType);
 
     if(dwRegType == REG_SZ || dwRegType == REG_EXPAND_SZ){
@@ -493,7 +548,7 @@ bool ParseArguments(char * args, int arglen, PREGISTRY_OPERATION pRegistryOperat
         *pRegistryOperation = RegistryQueryOperation;
     else if( MSVCRT$_stricmp("add", regCommand) == 0)
         *pRegistryOperation = RegistryAddOperation;
-    else if( MSVCRT$_stricmp("query", regCommand) == 0)
+    else if( MSVCRT$_stricmp("delete", regCommand) == 0)
         *pRegistryOperation = RegistryDeleteOperation;
     else{
         BeaconPrintf(CALLBACK_ERROR, "breg: Unknown command '%s'\n", regCommand);
