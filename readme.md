@@ -76,6 +76,34 @@ Values [1]:
   Value1       REG_SZ           My Data
 
 DONE
+
+beacon> breg delete "HKCU\Key With Space\Subkey1"
+[*] Tasked beacon to run breg delete "HKCU\Key With Space\Subkey1"
+[+] host called home, sent: 12275 bytes
+[+] received output:
+
+ Deleted key 'HKCU\Key With Space\Subkey1' 
+
+DONE
+
+beacon> breg query "HKCU\Key With Space"
+[*] Tasked beacon to run breg query "HKCU\Key With Space"
+[+] host called home, sent: 12266 bytes
+[+] received output:
+
+[HKCU\Key With Space] 
+
+Subkeys [1]:
+
+  HKCU\Key With Space\Subkey2
+
+Values [1]:
+
+  Name         Type             Data
+  ----         ----             ----
+  Value1       REG_SZ           My Data
+
+DONE
 ```
 
 Adding a value:
