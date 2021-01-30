@@ -1,6 +1,6 @@
 # Registry BOF
 
-A beacon object file for use with cobalt strike v4.1+. Supports querying, adding, and deleting keys/values and local and remote registries.
+A beacon object file for use with cobalt strike v4.1+. Supports querying, adding, and deleting keys/values of local and remote registries.
 
 ## Usage
 
