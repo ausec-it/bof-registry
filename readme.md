@@ -15,7 +15,7 @@ Usage: breg <command> <key> [/v value] [/t type] [/d data] [/a arch]
    - key: A windows registry key
       - If local must start with HKLM, HKCU, HKCR, HKU, or HKCC
       - If remote must be of the form \\computername\hiveroot[\subkey], where hiveroot is one of the aforementioned keys
-   - value: A value to query, add, or delete if dealing with values. Specify an empty string to manipulate the default value of a key (equivalent to /ve)
+   - value: A value to query, add, or delete if dealing with values. Specify an empty string to target the default value of a key (equivalent to /ve)
    - type: One of the following: REG_SZ, REG_NONE, REG_DWORD, REG_QWORD, REG_EXPAND_SZ. Other types are not supported at this time. Default is REG_SZ
    - data: Data to add if adding a value. This argument is required when adding a value unless the type is REG_NONE
    - arch: The version of the registry to check. Can be 'x64' or 'x32'. Default is the arch of the current beacon
